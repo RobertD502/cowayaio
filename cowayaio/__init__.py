@@ -7,7 +7,7 @@ from cowayaio.constants import (BASE_URI, BS, CLIENT_ID, CONTROL, DEVICE_LIST,
                               FILTERS, MCU_VERSION, OAUTH_URL, REDIRECT_URL,
                               SERVICE_CODE, SIGNIN_URL, STATUS, TIMEOUT,
                               TOKEN_REFRESH, USER_AGENT, pad,)
-from cowayaio.coway_client import (CowayClient, LOGGER, main, new_client,)
+from cowayaio.coway_client import (CowayClient, LOGGER,)
 from cowayaio.exceptions import (AuthError, CowayError,)
 from cowayaio.purifier_model import (CowayPurifier, PurifierData,)
 
