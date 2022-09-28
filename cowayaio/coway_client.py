@@ -8,14 +8,12 @@ import asyncio
 import json
 import base64
 import logging
-from urllib.parse import parse_qs
 
 from Crypto.Cipher import AES
 from Crypto import Random
 
 from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
-from yarl import URL
 
 from .constants import (BASE_URI, CLIENT_ID, CONTROL, DEVICE_LIST,
                               FILTERS, MCU_VERSION, OAUTH_URL, REDIRECT_URL,
@@ -52,6 +50,7 @@ class CowayClient:
         code = await self._get_auth_code(cookies)
         self.access_token, self.refresh_token = await self._get_token(code)
 
+
     async def _get_state_id(self) -> str:
         """ Get OAuth2 state. """
 
@@ -59,7 +58,9 @@ class CowayClient:
         if response.status != 200:
             error = response.text()
             raise CowayError(f'Coway API error while fetching OAuth2 state_id: {error}')
-        return parse_qs(URL(response.url).query_string)['state'][0]
+        state = response.url.query_string.split('state=',1)[1]
+        return state
+
 
     async def _authenticate(self, state_id: str) -> SimpleCookie:
         """ Get OAuth2 cookie. """
@@ -91,9 +92,11 @@ class CowayClient:
 
         response = await self._get(OAUTH_URL, cookies)
         try:
-            return parse_qs(URL(response.url).query_string)['code'][0]
-        except KeyError as kerr:
-            raise AuthError(f'Coway API authentication error: unable to retrieve auth {kerr}. Likely due to invalid username/password.') from kerr
+            query_string = response.url.query_string
+            auth_code = query_string[query_string.index('code=')+len('code='):query_string.index('&')]
+            return auth_code
+        except ValueError as verr:
+            raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.') from verr
 
     async def _get_token(self, code: str) -> tuple[str, str]:
         """ Get access token and refresh token. """
