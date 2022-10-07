@@ -1,19 +1,11 @@
-from cowayaio import constants
-from cowayaio import coway_client
-from cowayaio import exceptions
-from cowayaio import purifier_model
+"""Init file for CowayAIO"""
 
-from cowayaio.constants import (BASE_URI, BS, CLIENT_ID, CONTROL, DEVICE_LIST,
-                              FILTERS, MCU_VERSION, OAUTH_URL, REDIRECT_URL,
-                              SERVICE_CODE, SIGNIN_URL, STATUS, TIMEOUT,
-                              TOKEN_REFRESH, USER_AGENT, pad,)
-from cowayaio.coway_client import (CowayClient, LOGGER,)
-from cowayaio.exceptions import (AuthError, CowayError,)
-from cowayaio.purifier_model import (CowayPurifier, PurifierData,)
+from .constants import (BS, Endpoint, Endpoint_JSON, Header, pad, Parameter, TIMEOUT,)
+from .coway_client import (CowayClient, LOGGER,)
+from .exceptions import (AuthError, CowayError,)
+from .purifier_model import (CowayPurifier, PurifierData,)
+from .str_enum import StrEnum
 
-__all__ = ['AuthError', 'BASE_URI', 'BS', 'CLIENT_ID', 'CONTROL',
-           'CowayClient', 'CowayError', 'CowayPurifier', 'DEVICE_LIST',
-           'FILTERS', 'LOGGER', 'MCU_VERSION', 'OAUTH_URL', 'PurifierData',
-           'REDIRECT_URL', 'SERVICE_CODE', 'SIGNIN_URL', 'STATUS', 'TIMEOUT',
-           'TOKEN_REFRESH', 'USER_AGENT', 'constants', 'coway_client',
-           'exceptions', 'main', 'new_client', 'pad', 'purifier_model']
+__all__ = ['AuthError', 'BS', 'CowayClient', 'CowayError', 'CowayPurifier',
+           'Endpoint', 'Endpoint_JSON', 'Header', 'LOGGER', 'pad', 'Parameter',
+           'PurifierData', 'TIMEOUT', 'StrEnum']
