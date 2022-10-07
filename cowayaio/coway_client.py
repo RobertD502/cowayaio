@@ -1,9 +1,7 @@
 """Python API for Coway IoCare Purifiers"""
-
 from __future__ import annotations
 
 from typing import Any
-
 import asyncio
 import json
 import base64
@@ -11,27 +9,25 @@ import logging
 
 from Crypto.Cipher import AES
 from Crypto import Random
-
 from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
 
-from .constants import (BASE_URI, CLIENT_ID, CONTROL, DEVICE_LIST,
-                              FILTERS, MCU_VERSION, OAUTH_URL, REDIRECT_URL,
-                              SERVICE_CODE, SIGNIN_URL, STATUS, TIMEOUT,
-                              TOKEN_REFRESH, USER_AGENT, pad,)
-from .exceptions import CowayError, AuthError
-from .purifier_model import PurifierData, CowayPurifier
+from cowayaio.constants import (Endpoint, Endpoint_JSON, Header, pad, Parameter, TIMEOUT,)
+from cowayaio.exceptions import CowayError, AuthError
+from cowayaio.purifier_model import PurifierData, CowayPurifier
 
 
 LOGGER = logging.getLogger(__name__)
 
+
 class CowayClient:
-    """ Coway client. """
+    """Coway client."""
 
     def __init__(
         self, username: str, password: str, session: ClientSession | None = None, timeout: int = TIMEOUT
     ) -> None:
-        """Initialize Coway Client
+        """Initialize Coway Client.
+
         username: Coway IoCare account e-mail or phone number
         password: Coway IoCare account password
         session: aiohttp.ClientSession or None to create a new session
@@ -50,20 +46,18 @@ class CowayClient:
         code = await self._get_auth_code(cookies)
         self.access_token, self.refresh_token = await self._get_token(code)
 
-
     async def _get_state_id(self) -> str:
-        """ Get OAuth2 state. """
+        """Get OAuth2 state."""
 
-        response = await self._get(OAUTH_URL)
+        response = await self._get(Endpoint.OAUTH_URL)
         if response.status != 200:
             error = response.text()
             raise CowayError(f'Coway API error while fetching OAuth2 state_id: {error}')
         state = response.url.query_string.split('state=',1)[1]
         return state
 
-
     async def _authenticate(self, state_id: str) -> SimpleCookie:
-        """ Get OAuth2 cookie. """
+        """Get OAuth2 cookie."""
 
         key = Random.new().read(16)
         iv = Random.new().read(AES.block_size)
@@ -74,7 +68,7 @@ class CowayClient:
 
         headers = {
             'Content-Type': 'application/json',
-            'User-Agent': USER_AGENT
+            'User-Agent': Header.USER_AGENT
         }
 
         data = {
@@ -84,13 +78,13 @@ class CowayClient:
             'auto_login': 'Y'
         }
 
-        response = await self._post(SIGNIN_URL, headers, data)
+        response = await self._post(Endpoint.SIGNIN_URL, headers, data)
         return response.cookies
 
     async def _get_auth_code(self, cookies: SimpleCookie) -> str:
-        """ Get OAuth2 auth code. """
+        """Get OAuth2 auth code."""
 
-        response = await self._get(OAUTH_URL, cookies)
+        response = await self._get(Endpoint.OAUTH_URL, cookies)
         try:
             query_string = response.url.query_string
             auth_code = query_string[query_string.index('code=')+len('code='):query_string.index('&')]
@@ -99,22 +93,22 @@ class CowayClient:
             raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.') from verr
 
     async def _get_token(self, code: str) -> tuple[str, str]:
-        """ Get access token and refresh token. """
+        """Get access token and refresh token."""
 
         params = {
             'authCode': code,
             'isMobile': 'M',
             'langCd': 'en',
             'osType': 1,
-            'redirectUrl': REDIRECT_URL,
-            'serviceCode': SERVICE_CODE
+            'redirectUrl': Endpoint.REDIRECT_URL,
+            'serviceCode': Parameter.SERVICE_CODE
         }
 
-        response = await self._post_endpoint(TOKEN_REFRESH, params)
+        response = await self._post_endpoint(Endpoint_JSON.TOKEN_REFRESH, params)
         return response['header']['accessToken'], response['header']['refreshToken']
 
     async def async_get_purifiers(self) -> dict[str, Any]:
-        """ Gets all purifiers linked to Coway account. """
+        """Gets all purifiers linked to Coway account."""
 
         if self.access_token is None:
             await self.login()
@@ -125,15 +119,15 @@ class CowayClient:
         }
 
         try:
-            response = await self._post_endpoint(DEVICE_LIST, params)
+            response = await self._post_endpoint(Endpoint_JSON.DEVICE_LIST, params)
         except AuthError:
             LOGGER.warning('Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
             await self.login()
-            response = await self._post_endpoint(DEVICE_LIST, params)
+            response = await self._post_endpoint(Endpoint_JSON.DEVICE_LIST, params)
         return response
 
     async def async_get_purifiers_data(self) -> PurifierData:
-        """ Return dataclass with Purifier Devices. """
+        """Return dataclass with Purifier Devices."""
 
         purifiers = []
         data = await self.async_get_purifiers()
@@ -212,28 +206,27 @@ class CowayClient:
 
         return PurifierData(purifiers=device_data)
 
-
     async def async_fetch_all_endpoints(self, device_attr) -> tuple:
         """Parallel request are made to all endpoints for each purifier.
-        returns a list containing mcu_version, control status, filters, and air quality sensors
+
+        Returns a list containing mcu_version, control status, filters, and air quality sensors
         """
 
         results = await asyncio.gather(*[self.async_get_mcu_version(device_attr), self.async_get_control_status(device_attr), self.async_get_quality_status(device_attr)],)
         return results
 
-
     async def async_get_mcu_version(self, device_attr: dict[str, Any]) -> dict[str, Any]:
-        """ Return MCU version for a single purifier. """
+        """Return MCU version for a single purifier."""
 
         params = {
             'deviceId': device_attr['device_id'],
         }
 
-        response = await self._post_endpoint(MCU_VERSION, params)
+        response = await self._post_endpoint(Endpoint_JSON.MCU_VERSION, params)
         return response['body']
 
     async def async_get_control_status(self, device_attr: dict[str, Any]) -> tuple[dict, bool]:
-        """ Returns power state, mode, speed, etc. for a single purifier. """
+        """Returns power state, mode, speed, etc. for a single purifier."""
 
         params = {
             'barcode': device_attr['device_id'],
@@ -245,11 +238,11 @@ class CowayClient:
             'refreshFlag': 'true'
         }
 
-        response = await self._post_endpoint(STATUS, params)
+        response = await self._post_endpoint(Endpoint_JSON.STATUS, params)
         return response['body']['controlStatus'], response['body']['netStatus']
 
     async def async_get_quality_status(self, device_attr: dict[str, Any]) -> tuple[list, list, list]:
-        """ Returns data for prefilter, max2 filter, and air quality sensors. """
+        """Returns data for prefilter, max2 filter, and air quality sensors."""
 
         params = {
             'barcode': device_attr['device_id'],
@@ -261,7 +254,7 @@ class CowayClient:
             'refreshFlag': 'true'
         }
 
-        response = await self._post_endpoint(FILTERS, params)
+        response = await self._post_endpoint(Endpoint_JSON.FILTERS, params)
         return response['body']['filterList'], response['body']['prodStatus'], response['body']['IAQ']
 
 
@@ -274,79 +267,72 @@ class CowayClient:
     **************************************************************************************************************************************************
     """
 
-
     async def async_set_power(self, device_attr: dict[str, str], is_on: bool) -> None:
-        """ Provide is_on as True for On and False for Off. """
+        """Provide is_on as True for On and False for Off."""
 
         await self.async_control_purifier(device_attr, '0001', '1' if is_on else '0')
 
-
     async def async_set_auto_mode(self, device_attr: dict[str, str]) -> None:
-        """ Set Purifier to Auto Mode. """
+        """Set Purifier to Auto Mode."""
 
         await self.async_control_purifier(device_attr, '0002', '1')
 
-
     async def async_set_night_mode(self, device_attr: dict[str, str]) -> None:
-        """ Set Purifier to Night Mode. """
+        """Set Purifier to Night Mode."""
 
         await self.async_control_purifier(device_attr, '0002', '2')
 
-
     async def async_set_fan_speed(self, device_attr: dict[str, str], speed: str) -> None:
-        """ Speed can be 1, 2, or 3 represented as a string. """
+        """Speed can be 1, 2, or 3 represented as a string."""
 
         await self.async_control_purifier(device_attr, '0003', speed)
 
-
     async def async_set_light(self, device_attr: dict[str, str], light_on: bool) -> None:
-        """ Provide light_on as True for On and False for Off. """
+        """Provide light_on as True for On and False for Off."""
 
         await self.async_control_purifier(device_attr, '0007', '2' if light_on else '0')
 
-
     async def async_set_timer(self, device_attr: dict[str, str], time: str) -> None:
-        """ Time, in minutes, can be 0, 60, 120, 240, or 480 represented as a string. A time of 0 sets the timer to off. """
+        """Time, in minutes, can be 0, 60, 120, 240, or 480 represented as a string. A time of 0 sets the timer to off."""
 
         await self.async_control_purifier(device_attr, '0008', time)
 
 
 #####################################################################################################################################################
 
-
     async def _get(self, url: str, cookies: SimpleCookie | None = None) -> ClientResponse:
-        """ Make GET API call to Coway's servers. """
+        """Make GET API call to Coway's servers."""
 
         headers = {
-            'User-Agent': USER_AGENT
+            'User-Agent': Header.USER_AGENT
         }
 
         params = {
             'auth_type': 0,
             'response_type': 'code',
-            'client_id': CLIENT_ID,
+            'client_id': Parameter.CLIENT_ID,
             'scope': 'login',
             'lang': 'en_US',
-            'redirect_url': REDIRECT_URL
+            'redirect_url': Endpoint.REDIRECT_URL
         }
 
         async with self._session.get(url, cookies=cookies, headers=headers, params=params, timeout=self.timeout) as resp:
             return resp
 
     async def _post(self, url: str, headers: dict[str, Any], data: dict[str, Any]) -> ClientResponse:
-        """ Make POST API call to for authentication endpoint. """
+        """Make POST API call to for authentication endpoint."""
 
         async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
             return resp
 
     async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
-        """ Make POST API call to various endpoints. """
+        """Make POST API call to various endpoints."""
 
-        url = BASE_URI + '/' + endpoint + '.json'
+        url = Endpoint.BASE_URI + '/' + endpoint + '.json'
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': USER_AGENT
+            'User-Agent': Header.USER_AGENT
         }
         message = {
             'header': {
@@ -364,11 +350,11 @@ class CowayClient:
             return await self._response(resp)
 
     async def async_control_purifier(self, device_attr: dict[str, str], command: str, value: Any) -> ClientResponse:
-        url = BASE_URI + '/' + CONTROL + '.json'
+        url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CONTROL + '.json'
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
-            'User-Agent': USER_AGENT
+            'User-Agent': Header.USER_AGENT
         }
         params = {
             'barcode': device_attr.get('device_id'),
@@ -383,7 +369,7 @@ class CowayClient:
         }
         message = {
             'header': {
-                'trcode': CONTROL,
+                'trcode': Endpoint_JSON.CONTROL,
                 'accessToken': self.access_token,
                 'refreshToken': self.refresh_token
             },
@@ -398,7 +384,7 @@ class CowayClient:
 
     @staticmethod
     async def _response(resp: ClientResponse) -> dict[str, Any]:
-        """ Return response from API call. """
+        """Return response from API call."""
 
         if resp.status != 200:
             error = await resp.text()
