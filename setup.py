@@ -17,7 +17,7 @@ setuptools.setup(
     python_requires= ">=3.8",
     install_requires=[
         "aiohttp>=3.8.1",
-        "pycryptodome>=3.14.1"
+        "beautifulsoup4>=4.11.1"
     ],
     classifiers=(
         "Programming Language :: Python :: 3",
