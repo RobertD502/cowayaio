@@ -4,15 +4,13 @@ from __future__ import annotations
 from typing import Any
 import asyncio
 import json
-import base64
 import logging
 
-from Crypto.Cipher import AES
-from Crypto import Random
+from bs4 import BeautifulSoup
 from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
 
-from cowayaio.constants import (Endpoint, Endpoint_JSON, Header, pad, Parameter, TIMEOUT,)
+from cowayaio.constants import (Endpoint, Endpoint_JSON, Header, Parameter, TIMEOUT,)
 from cowayaio.exceptions import CowayError, AuthError
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
@@ -41,67 +39,53 @@ class CowayClient:
         self.timeout = timeout
 
     async def login(self) -> None:
-        state_id = await self._get_state_id()
-        cookies = await self._authenticate(state_id)
-        code = await self._get_auth_code(cookies)
-        self.access_token, self.refresh_token = await self._get_token(code)
+        login_url, cookies = await self._get_login_cookies()
+        auth_code = await self._get_auth_code(login_url, cookies)
+        self.access_token, self.refresh_token = await self._get_token(auth_code)
 
-    async def _get_state_id(self) -> str:
-        """Get OAuth2 state."""
+    async def _get_login_cookies(self) -> tuple[str, SimpleCookie]:
+        """Get openid-connect login url and associated cookies."""
 
-        response = await self._get(Endpoint.OAUTH_URL)
+        response, html_page = await self._get(Endpoint.OAUTH_URL)
         if response.status != 200:
             error = response.text()
-            raise CowayError(f'Coway API error while fetching OAuth2 state_id: {error}')
-        state = response.url.query_string.split('state=',1)[1]
-        return state
+            raise CowayError(f'Coway API error while fetching login page: {error}')
+        cookies = response.cookies
+        soup = BeautifulSoup(html_page, 'html.parser')
+        login_url = soup.find('form', id='kc-form-login').get('action')
+        return login_url, cookies
 
-    async def _authenticate(self, state_id: str) -> SimpleCookie:
-        """Get OAuth2 cookie."""
-
-        key = Random.new().read(16)
-        iv = Random.new().read(AES.block_size)
-        aes = AES.new(key, AES.MODE_CBC, IV=iv)
-        i = base64.b64encode(iv).decode('utf-8')
-        k = base64.b64encode(key).decode('utf-8')
-        enc = aes.encrypt(pad(self.password).encode('utf-8')).hex()
+    async def _get_auth_code(self, login_url: str, cookies: SimpleCookie) -> str:
+        """Get auth code"""
 
         headers = {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
             'User-Agent': Header.USER_AGENT
         }
-
         data = {
+            'termAgreementStatus': '',
+            'idp': '',
             'username': self.username,
-            'password': i + ":" + enc + ":" + k,
-            'state': state_id,
-            'auto_login': 'Y'
+            'password': self.password,
+            'rememberMe': 'on'
         }
+        response = await self._post(login_url, cookies, headers, data)
+        if not response.history:
+            raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.')
+        else:
+            code = response.url.query_string.partition('code=')[-1]
+            return code
 
-        response = await self._post(Endpoint.SIGNIN_URL, headers, data)
-        return response.cookies
-
-    async def _get_auth_code(self, cookies: SimpleCookie) -> str:
-        """Get OAuth2 auth code."""
-
-        response = await self._get(Endpoint.OAUTH_URL, cookies)
-        try:
-            query_string = response.url.query_string
-            auth_code = query_string[query_string.index('code=')+len('code='):query_string.index('&')]
-            return auth_code
-        except ValueError as verr:
-            raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.') from verr
-
-    async def _get_token(self, code: str) -> tuple[str, str]:
+    async def _get_token(self, auth_code: str) -> tuple[str, str]:
         """Get access token and refresh token."""
 
         params = {
-            'authCode': code,
+            'authCode': auth_code,
             'isMobile': 'M',
             'langCd': 'en',
             'osType': 1,
             'redirectUrl': Endpoint.REDIRECT_URL,
-            'serviceCode': Parameter.SERVICE_CODE
+            'serviceCode': Parameter.SERVICE_CODE,
         }
 
         response = await self._post_endpoint(Endpoint_JSON.TOKEN_REFRESH, params)
@@ -206,6 +190,7 @@ class CowayClient:
 
         return PurifierData(purifiers=device_data)
 
+
     async def async_fetch_all_endpoints(self, device_attr) -> tuple:
         """Parallel request are made to all endpoints for each purifier.
 
@@ -300,45 +285,57 @@ class CowayClient:
 
 #####################################################################################################################################################
 
+
     async def _get(self, url: str, cookies: SimpleCookie | None = None) -> ClientResponse:
         """Make GET API call to Coway's servers."""
 
         headers = {
-            'User-Agent': Header.USER_AGENT
+            'user-agent': Header.USER_AGENT,
+            'accept': Header.ACCEPT,
+            'accept-language': Header.ACCEPT_LANG
         }
 
         params = {
             'auth_type': 0,
             'response_type': 'code',
             'client_id': Parameter.CLIENT_ID,
-            'scope': 'login',
-            'lang': 'en_US',
-            'redirect_url': Endpoint.REDIRECT_URL
+            'ui_locales': 'en-US',
+            'dvc_cntry_id': 'US',
+            'redirect_uri': Endpoint.REDIRECT_URL
         }
 
         async with self._session.get(url, cookies=cookies, headers=headers, params=params, timeout=self.timeout) as resp:
-            return resp
+            html_page = await resp.text()
+            return resp, html_page
 
-    async def _post(self, url: str, headers: dict[str, Any], data: dict[str, Any]) -> ClientResponse:
+    async def _post(self, url: str, cookies: SimpleCookie, headers: dict[str, Any], data: dict[str, Any]) -> ClientResponse:
         """Make POST API call to for authentication endpoint."""
 
-        async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
+        async with self._session.post(url, cookies=cookies, headers=headers, data=data, timeout=self.timeout) as resp:
             return resp
 
     async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Make POST API call to various endpoints."""
 
+
         url = Endpoint.BASE_URI + '/' + endpoint + '.json'
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': Header.USER_AGENT
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'Accept': 'application/json, text/plain, */*',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1'
         }
+
         message = {
             'header': {
+                "result": False,
+                "error_code": "",
+                "error_text": "",
+                "info_text": "",
+                "message_version": "",
+                "login_session_id": "",
                 'trcode': endpoint,
-                'accessToken': self.access_token,
-                'refreshToken': self.refresh_token
+                'accessToken': self.access_token if self.access_token else "",
+                'refreshToken': self.refresh_token if self.refresh_token else ""
             },
             'body': params
         }
@@ -348,6 +345,7 @@ class CowayClient:
 
         async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
             return await self._response(resp)
+
 
     async def async_control_purifier(self, device_attr: dict[str, str], command: str, value: Any) -> ClientResponse:
         url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CONTROL + '.json'
