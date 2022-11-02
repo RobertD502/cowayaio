@@ -166,6 +166,7 @@ class CowayClient:
                 is_on=is_on,
                 auto_mode=auto_mode,
                 auto_eco_mode=auto_eco_mode,
+                eco_mode=eco_mode,
                 night_mode=night_mode,
                 fan_speed=fan_speed,
                 light_on=light_on,
