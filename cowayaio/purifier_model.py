@@ -20,6 +20,7 @@ class CowayPurifier:
     is_on: bool
     auto_mode: bool
     auto_eco_mode: bool
+    eco_mode: bool
     night_mode: bool
     fan_speed: str | None
     light_on: bool
