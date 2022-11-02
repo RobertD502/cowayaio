@@ -136,6 +136,7 @@ class CowayClient:
             is_on = state[1][0].get('0001') == '1'
             auto_mode = state[1][0].get('0002') == '1'
             auto_eco_mode = state[1][0].get('0002') == '6'
+            eco_mode = state[1][0].get('0002') == '6'
             night_mode = state[1][0].get('0002') == '2'
             fan_speed = state[1][0].get('0003')
             light_on = state[1][0].get('0007') == '2'
@@ -266,6 +267,13 @@ class CowayClient:
         """Set Purifier to Night Mode."""
 
         await self.async_control_purifier(device_attr, '0002', '2')
+
+    async def async_set_eco_mode(self, device_attr: dict[str, str]) -> None:
+        """Set Purifier to Eco Mode.
+        Only applies to AIRMEGA AP-1512HHS models.
+        """
+
+        await self.async_control_purifier(device_attr, '0002', '6')        
 
     async def async_set_fan_speed(self, device_attr: dict[str, str], speed: str) -> None:
         """Speed can be 1, 2, or 3 represented as a string."""
