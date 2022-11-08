@@ -52,7 +52,10 @@ class CowayClient:
             raise CowayError(f'Coway API error while fetching login page: {error}')
         cookies = response.cookies
         soup = BeautifulSoup(html_page, 'html.parser')
-        login_url = soup.find('form', id='kc-form-login').get('action')
+        try:
+            login_url = soup.find('form', id='kc-form-login').get('action')
+        except AttributeError:
+            raise CowayError(f'Coway API error: Coway servers did not return a valid Login URL. Retrying now.')
         return login_url, cookies
 
     async def _get_auth_code(self, login_url: str, cookies: SimpleCookie) -> str:
