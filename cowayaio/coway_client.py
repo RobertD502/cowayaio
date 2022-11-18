@@ -118,8 +118,11 @@ class CowayClient:
 
         purifiers = []
         data = await self.async_get_purifiers()
-        for purifier in data['body']['deviceInfos']:
-            purifiers.append(purifier)
+        try:
+            for purifier in data['body']['deviceInfos']:
+                purifiers.append(purifier)
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier data.')
 
         device_data: dict[str, CowayPurifier] = {}
         dev: dict
