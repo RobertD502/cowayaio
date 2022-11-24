@@ -137,33 +137,40 @@ class CowayClient:
                 'device_brand': dev.get('dvcBrandCd'),
             }
             state = await self.async_fetch_all_endpoints(device_attr)
-            mcu_version = state[0].get('curMcuVer')
             network_status = state[1][1]
-            is_on = state[1][0].get('0001') == '1'
-            auto_mode = state[1][0].get('0002') == '1'
-            auto_eco_mode = state[1][0].get('0002') == '6'
-            eco_mode = state[1][0].get('0002') == '6'
-            night_mode = state[1][0].get('0002') == '2'
-            fan_speed = state[1][0].get('0003')
-            light_on = state[1][0].get('0007') == '2'
-            timer = state[1][0].get('offTimerData')
-            timer_remaining = state[1][0].get('0008')
-            pre_filter_name = state[2][0][0].get('filterName')
-            pre_filter_pct = state[2][0][0].get('filterPer')
-            pre_filter_last_changed = state[2][0][0].get('lastChangeDate')
-            pre_filter_change_months = state[2][0][0].get('changeCycle')
-            max2_name = state[2][0][1].get('filterName')
-            max2_pct = state[2][0][1].get('filterPer')
-            max2_last_changed = state[2][0][1].get('lastChangeDate')
-            max2_change_months = state[2][0][1].get('changeCycle')
-            dust_pollution = state[2][1][0].get('dustPollution')
-            air_volume = state[2][1][0].get('airVolume')
-            pollen_mode = state[2][1][0].get('pollenMode')
-            particulate_matter_2_5 = state[2][2][0].get('dustpm25')
-            particulate_matter_10 = state[2][2][0].get('dustpm10')
-            carbon_dioxide = state[2][2][0].get('co2')
-            volatile_organic_compounds = state[2][2][0].get('vocs')
-            air_quality_index = state[2][2][0].get('inairquality')
+            try:
+                mcu_version = state[0].get('curMcuVer')
+                is_on = state[1][0].get('0001') == '1'
+                auto_mode = state[1][0].get('0002') == '1'
+                auto_eco_mode = state[1][0].get('0002') == '6'
+                eco_mode = state[1][0].get('0002') == '6'
+                night_mode = state[1][0].get('0002') == '2'
+                fan_speed = state[1][0].get('0003')
+                light_on = state[1][0].get('0007') == '2'
+                timer = state[1][0].get('offTimerData')
+                timer_remaining = state[1][0].get('0008')
+                pre_filter_name = state[2][0][0].get('filterName')
+                pre_filter_pct = state[2][0][0].get('filterPer')
+                pre_filter_last_changed = state[2][0][0].get('lastChangeDate')
+                pre_filter_change_months = state[2][0][0].get('changeCycle')
+                max2_name = state[2][0][1].get('filterName')
+                max2_pct = state[2][0][1].get('filterPer')
+                max2_last_changed = state[2][0][1].get('lastChangeDate')
+                max2_change_months = state[2][0][1].get('changeCycle')
+                dust_pollution = state[2][1][0].get('dustPollution')
+                air_volume = state[2][1][0].get('airVolume')
+                pollen_mode = state[2][1][0].get('pollenMode')
+                particulate_matter_2_5 = state[2][2][0].get('dustpm25')
+                particulate_matter_10 = state[2][2][0].get('dustpm10')
+                carbon_dioxide = state[2][2][0].get('co2')
+                volatile_organic_compounds = state[2][2][0].get('vocs')
+                air_quality_index = state[2][2][0].get('inairquality')
+            except IndexError:
+                if not network_status:
+                    LOGGER.warning(f'Purifier {device_attr["name"]} is not connected to WiFi.')
+                    continue
+                else:
+                    raise
 
             device_data[device_attr['device_id']] = CowayPurifier(
                 device_attr=device_attr,
@@ -197,7 +204,6 @@ class CowayClient:
             )
 
         return PurifierData(purifiers=device_data)
-
 
     async def async_fetch_all_endpoints(self, device_attr) -> tuple:
         """Parallel request are made to all endpoints for each purifier.
