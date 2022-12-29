@@ -33,6 +33,7 @@ class CowayClient:
 
         self.username = username
         self.password = password
+        self.skip_password_change = False
         self._session = session if session else ClientSession()
         self.access_token = None
         self.refresh_token = None
@@ -333,7 +334,20 @@ class CowayClient:
         """Make POST API call to for authentication endpoint."""
 
         async with self._session.post(url, cookies=cookies, headers=headers, data=data, timeout=self.timeout) as resp:
-            return resp
+            if resp.content_type == 'text/html':
+                html_page = await resp.text()
+                soup = BeautifulSoup(html_page, 'html.parser')
+                page_title = soup.find('title').string
+                if page_title == 'Coway - Password change message':
+                    if self.skip_password_change:
+                        form_url = soup.find('form', id='kc-password-change-form').get('action')
+                        """Need to add code here"""
+                    else:
+                        raise AuthError("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
+                else:
+                    return resp
+            else:
+                return resp
 
     async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Make POST API call to various endpoints."""
