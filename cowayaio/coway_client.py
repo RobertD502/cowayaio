@@ -73,7 +73,18 @@ class CowayClient:
             'password': self.password,
             'rememberMe': 'on'
         }
-        response = await self._post(login_url, cookies, headers, data)
+
+        password_skip_data = {
+            'cmd': 'change_next_time',
+            'checkPasswordNeededYn': 'Y',
+            'current_password': '',
+            'new_password': '',
+            'new_password_confirm': ''
+        }
+
+        response, password_skip_init = await self._post(login_url, cookies, headers, data)
+        if password_skip_init:
+            response, password_skip_init = await self._post(response, cookies, headers, password_skip_data)
         if not response.history:
             raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.')
         else:
@@ -205,6 +216,7 @@ class CowayClient:
             )
 
         return PurifierData(purifiers=device_data)
+
 
     async def async_fetch_all_endpoints(self, device_attr) -> tuple:
         """Parallel request are made to all endpoints for each purifier.
@@ -338,16 +350,19 @@ class CowayClient:
                 html_page = await resp.text()
                 soup = BeautifulSoup(html_page, 'html.parser')
                 page_title = soup.find('title').string
-                if page_title == 'Coway - Password change message':
+                if (page_title is not None) and (page_title == 'Coway - Password change message'):
                     if self.skip_password_change:
                         form_url = soup.find('form', id='kc-password-change-form').get('action')
-                        """Need to add code here"""
+                        password_skip_init = True
+                        return form_url, password_skip_init
                     else:
                         raise PasswordExpired("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
                 else:
-                    return resp
+                    password_skip_init = False
+                    return resp, password_skip_init
             else:
-                return resp
+                password_skip_init = False
+                return resp, password_skip_init
 
     async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Make POST API call to various endpoints."""
