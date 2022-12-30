@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="cowayaio",
-    version="0.1.5.1",
+    version="0.1.5.2",
     author="Robert Drinovac",
     author_email="unlisted@gmail.com",
     description="A asynchronous python library for Coway Air Purifiers ",
