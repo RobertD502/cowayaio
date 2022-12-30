@@ -11,7 +11,7 @@ from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
 
 from cowayaio.constants import (Endpoint, Endpoint_JSON, Header, Parameter, TIMEOUT,)
-from cowayaio.exceptions import CowayError, AuthError
+from cowayaio.exceptions import AuthError, CowayError, PasswordExpired
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
 
@@ -343,7 +343,7 @@ class CowayClient:
                         form_url = soup.find('form', id='kc-password-change-form').get('action')
                         """Need to add code here"""
                     else:
-                        raise AuthError("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
+                        raise PasswordExpired("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
                 else:
                     return resp
             else:
