@@ -235,7 +235,11 @@ class CowayClient:
         }
 
         response = await self._post_endpoint(Endpoint_JSON.MCU_VERSION, params)
-        return response['body']
+        try:
+            mcu_version = response['body']
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier MCU version.')
+        return mcu_version
 
     async def async_get_control_status(self, device_attr: dict[str, Any]) -> tuple[dict, bool]:
         """Returns power state, mode, speed, etc. for a single purifier."""
@@ -251,7 +255,12 @@ class CowayClient:
         }
 
         response = await self._post_endpoint(Endpoint_JSON.STATUS, params)
-        return response['body']['controlStatus'], response['body']['netStatus']
+        try:
+            control_status = response['body']['controlStatus']
+            net_status = response['body']['netStatus']
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier control status.')
+        return control_status, net_status
 
     async def async_get_quality_status(self, device_attr: dict[str, Any]) -> tuple[list, list, list]:
         """Returns data for prefilter, max2 filter, and air quality sensors."""
@@ -267,7 +276,13 @@ class CowayClient:
         }
 
         response = await self._post_endpoint(Endpoint_JSON.FILTERS, params)
-        return response['body']['filterList'], response['body']['prodStatus'], response['body']['IAQ']
+        try:
+            filter_list = response['body']['filterList']
+            prod_status = response['body']['prodStatus']
+            iaq = response['body']['IAQ']
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier quality status.')
+        return filter_list, prod_status, iaq
 
 
     """
@@ -299,7 +314,7 @@ class CowayClient:
         Only applies to AIRMEGA AP-1512HHS models.
         """
 
-        await self.async_control_purifier(device_attr, '0002', '6')        
+        await self.async_control_purifier(device_attr, '0002', '6')
 
     async def async_set_fan_speed(self, device_attr: dict[str, str], speed: str) -> None:
         """Speed can be 1, 2, or 3 represented as a string."""
