@@ -147,6 +147,7 @@ class CowayClient:
                 'product_name_full': dev.get('prodNameFull'),
                 'device_type': dev.get('dvcTypeCd'),
                 'device_brand': dev.get('dvcBrandCd'),
+                'device_seq': dev.get('dvcSeq')
             }
             state = await self.async_fetch_all_endpoints(device_attr)
             network_status = state[1][1]
@@ -224,7 +225,7 @@ class CowayClient:
         Returns a list containing mcu_version, control status, filters, and air quality sensors
         """
 
-        results = await asyncio.gather(*[self.async_get_mcu_version(device_attr), self.async_get_control_status(device_attr), self.async_get_quality_status(device_attr)],)
+        results = await asyncio.gather(*[self.async_get_mcu_version(device_attr), self.async_get_control_status(device_attr), self.async_get_quality_status(device_attr), self.async_get_prod_settings(device_attr)],)
         return results
 
     async def async_get_mcu_version(self, device_attr: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +285,24 @@ class CowayClient:
             raise CowayError(f'Coway API error: Coway server failed to return purifier quality status.')
         return filter_list, prod_status, iaq
 
+    async def async_get_prod_settings(self, device_attr: dict[str, Any]) -> tuple[list, list, list]:
+        """Returns purifier settings such as pre-filter frequency and smart mode sensitivity."""
 
+        params = {
+            'access_token': self.access_token,
+            'dvc_seq': device_attr['device_seq']
+        }
+
+        response = await self._post_endpoint(Endpoint_JSON.PROD_SETTINGS, params)
+        try:
+            device_infos = response['body']['deviceInfos']
+            pre_filter_frequency = response['body']['frequency']
+            smart_mode_sensitivity = response['body']['sensitivity']
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier settings.')
+        return device_infos, pre_filter_frequency, smart_mode_sensitivity
+
+    
     """
     **************************************************************************************************************************************************
 
