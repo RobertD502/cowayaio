@@ -178,6 +178,8 @@ class CowayClient:
                 carbon_dioxide = state[2][2][0].get('co2')
                 volatile_organic_compounds = state[2][2][0].get('vocs')
                 air_quality_index = state[2][2][0].get('inairquality')
+                pre_filter_change_frequency = state[3][1]
+                smart_mode_sensitivity = state[3][2]
             except IndexError:
                 if not network_status:
                     LOGGER.warning(f'Purifier {device_attr["name"]} is not connected to WiFi.')
@@ -214,6 +216,8 @@ class CowayClient:
                 carbon_dioxide=carbon_dioxide,
                 volatile_organic_compounds=volatile_organic_compounds,
                 air_quality_index=air_quality_index,
+                pre_filter_change_frequency=pre_filter_change_frequency,
+                smart_mode_sensitivity=smart_mode_sensitivity
             )
 
         return PurifierData(purifiers=device_data)
@@ -349,6 +353,11 @@ class CowayClient:
 
         await self.async_control_purifier(device_attr, '0008', time)
 
+    async def async_set_smart_mode_sensitivity(self, device_attr: dict[str, str], sensitivity: str) -> None:
+        """Sensitivity can be 1, 2, or 3. 1 = Sensitive, 2 = Normal, 3 = Insensitive. """
+
+        await self.async_control_purifier(device_attr, '000A', sensitivity)
+
 
 #####################################################################################################################################################
 
@@ -451,6 +460,35 @@ class CowayClient:
         message = {
             'header': {
                 'trcode': Endpoint_JSON.CONTROL,
+                'accessToken': self.access_token,
+                'refreshToken': self.refresh_token
+            },
+            'body': params
+        }
+        data = {
+            'message': json.dumps(message)
+        }
+
+        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
+            return resp
+
+    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str) -> ClientResponse:
+        """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
+
+        url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CHANGE_PRE_FILTER + '.json'
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'User-Agent': Header.USER_AGENT
+        }
+        params = {
+            'barcode': device_attr.get('device_id'),
+            'comdVal': value,
+            'mqttDevice': False
+        }
+        message = {
+            'header': {
+                'trcode': Endpoint_JSON.CHANGE_PRE_FILTER,
                 'accessToken': self.access_token,
                 'refreshToken': self.refresh_token
             },
