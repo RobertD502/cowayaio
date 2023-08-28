@@ -147,6 +147,7 @@ class CowayClient:
                 'product_name_full': dev.get('prodNameFull'),
                 'device_type': dev.get('dvcTypeCd'),
                 'device_brand': dev.get('dvcBrandCd'),
+                'device_seq': dev.get('dvcSeq')
             }
             state = await self.async_fetch_all_endpoints(device_attr)
             network_status = state[1][1]
@@ -177,6 +178,8 @@ class CowayClient:
                 carbon_dioxide = state[2][2][0].get('co2')
                 volatile_organic_compounds = state[2][2][0].get('vocs')
                 air_quality_index = state[2][2][0].get('inairquality')
+                pre_filter_change_frequency = state[3][1]
+                smart_mode_sensitivity = state[3][2]
             except IndexError:
                 if not network_status:
                     LOGGER.warning(f'Purifier {device_attr["name"]} is not connected to WiFi.')
@@ -213,6 +216,8 @@ class CowayClient:
                 carbon_dioxide=carbon_dioxide,
                 volatile_organic_compounds=volatile_organic_compounds,
                 air_quality_index=air_quality_index,
+                pre_filter_change_frequency=pre_filter_change_frequency,
+                smart_mode_sensitivity=smart_mode_sensitivity
             )
 
         return PurifierData(purifiers=device_data)
@@ -224,7 +229,7 @@ class CowayClient:
         Returns a list containing mcu_version, control status, filters, and air quality sensors
         """
 
-        results = await asyncio.gather(*[self.async_get_mcu_version(device_attr), self.async_get_control_status(device_attr), self.async_get_quality_status(device_attr)],)
+        results = await asyncio.gather(*[self.async_get_mcu_version(device_attr), self.async_get_control_status(device_attr), self.async_get_quality_status(device_attr), self.async_get_prod_settings(device_attr)],)
         return results
 
     async def async_get_mcu_version(self, device_attr: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +289,24 @@ class CowayClient:
             raise CowayError(f'Coway API error: Coway server failed to return purifier quality status.')
         return filter_list, prod_status, iaq
 
+    async def async_get_prod_settings(self, device_attr: dict[str, Any]) -> tuple[list, list, list]:
+        """Returns purifier settings such as pre-filter frequency and smart mode sensitivity."""
 
+        params = {
+            'access_token': self.access_token,
+            'dvc_seq': device_attr['device_seq']
+        }
+
+        response = await self._post_endpoint(Endpoint_JSON.PROD_SETTINGS, params)
+        try:
+            device_infos = response['body']['deviceInfos']
+            pre_filter_frequency = response['body']['frequency']
+            smart_mode_sensitivity = response['body']['sensitivity']
+        except KeyError:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier settings.')
+        return device_infos, pre_filter_frequency, smart_mode_sensitivity
+
+    
     """
     **************************************************************************************************************************************************
 
@@ -330,6 +352,11 @@ class CowayClient:
         """Time, in minutes, can be 0, 60, 120, 240, or 480 represented as a string. A time of 0 sets the timer to off."""
 
         await self.async_control_purifier(device_attr, '0008', time)
+
+    async def async_set_smart_mode_sensitivity(self, device_attr: dict[str, str], sensitivity: str) -> None:
+        """Sensitivity can be 1, 2, or 3. 1 = Sensitive, 2 = Normal, 3 = Insensitive. """
+
+        await self.async_control_purifier(device_attr, '000A', sensitivity)
 
 
 #####################################################################################################################################################
@@ -433,6 +460,35 @@ class CowayClient:
         message = {
             'header': {
                 'trcode': Endpoint_JSON.CONTROL,
+                'accessToken': self.access_token,
+                'refreshToken': self.refresh_token
+            },
+            'body': params
+        }
+        data = {
+            'message': json.dumps(message)
+        }
+
+        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
+            return resp
+
+    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str) -> ClientResponse:
+        """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
+
+        url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CHANGE_PRE_FILTER + '.json'
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'User-Agent': Header.USER_AGENT
+        }
+        params = {
+            'barcode': device_attr.get('device_id'),
+            'comdVal': value,
+            'mqttDevice': False
+        }
+        message = {
+            'header': {
+                'trcode': Endpoint_JSON.CHANGE_PRE_FILTER,
                 'accessToken': self.access_token,
                 'refreshToken': self.refresh_token
             },
