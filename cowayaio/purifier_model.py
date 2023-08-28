@@ -42,3 +42,5 @@ class CowayPurifier:
     carbon_dioxide: str
     volatile_organic_compounds: str
     air_quality_index: str
+    pre_filter_change_frequency: int
+    smart_mode_sensitivity: int
