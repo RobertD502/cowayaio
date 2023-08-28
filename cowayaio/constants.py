@@ -30,5 +30,6 @@ class Endpoint_JSON(StrEnum):
     CONTROL = 'CWIG0603'
     FILTERS = 'CWIA0120'
     MCU_VERSION = "CWIG0615"
+    PROD_SETTINGS = "CWIG0301"
 
 TIMEOUT = 5 * 60
