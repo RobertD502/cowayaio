@@ -22,8 +22,10 @@ class CowayPurifier:
     auto_eco_mode: bool
     eco_mode: bool
     night_mode: bool
+    rapid_mode: bool
     fan_speed: str | None
     light_on: bool
+    light_mode: str
     timer: str | None
     timer_remaining: str | None
     pre_filter_name: str
