@@ -13,7 +13,7 @@ class Parameter(StrEnum):
 
     CLIENT_ID = "cwid-prd-iocare-20220930"
     SERVICE_CODE = "com.coway.IOCareKor"
-    APP_VERSION = "2.3.22"
+    APP_VERSION = "2.3.33"
 
 class Header(StrEnum):
 
@@ -32,5 +32,12 @@ class Endpoint_JSON(StrEnum):
     MCU_VERSION = "CWIG0615"
     PROD_SETTINGS = "CWIG0301"
     CHANGE_PRE_FILTER = "CWIA0600"
+
+
+class LightMode(StrEnum):
+
+    ON = '0'
+    AQI_OFF = '1'
+    OFF = '2'
 
 TIMEOUT = 5 * 60
