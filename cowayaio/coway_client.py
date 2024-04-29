@@ -118,11 +118,13 @@ class CowayClient:
         }
 
         try:
-            response = await self._post_endpoint(Endpoint_JSON.DEVICE_LIST, params)
+            response = await self._get_endpoint(Endpoint_JSON.DEVICE_LIST, params)
         except AuthError:
             LOGGER.warning('Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
             await self.login()
-            response = await self._post_endpoint(Endpoint_JSON.DEVICE_LIST, params)
+            response = await self._get_endpoint(Endpoint_JSON.DEVICE_LIST, params)
+        if 'error' in response:
+            raise CowayError(f'Failed to get Coway devices. {response["error"]}')
         return response
 
     async def async_get_purifiers_data(self) -> PurifierData:
@@ -131,7 +133,7 @@ class CowayClient:
         purifiers = []
         data = await self.async_get_purifiers()
         try:
-            for purifier in data['body']['deviceInfos']:
+            for purifier in data['data']['deviceInfos']:
                 purifiers.append(purifier)
         except KeyError:
             raise CowayError(f'Coway API error: Coway server failed to return purifier data.')
@@ -242,12 +244,17 @@ class CowayClient:
         """Return MCU version for a single purifier."""
 
         params = {
-            'deviceId': device_attr['device_id'],
+            'devId': device_attr['device_id'],
         }
 
-        response = await self._post_endpoint(Endpoint_JSON.MCU_VERSION, params)
+        response = await self._get_endpoint(Endpoint_JSON.MCU_VERSION, params)
+        if 'error' in response:
+            raise CowayError(f'Coway server failed to return purifier MCU version. {response["error"]}')
+        if not response['data']:
+            raise CowayError('Coway server failed to return purifier MCU version.')
+
         try:
-            mcu_version = response['body']
+            mcu_version = response['data']
         except KeyError:
             raise CowayError(f'Coway API error: Coway server failed to return purifier MCU version.')
         return mcu_version
@@ -256,19 +263,21 @@ class CowayClient:
         """Returns power state, mode, speed, etc. for a single purifier."""
 
         params = {
-            'barcode': device_attr['device_id'],
+            'devId': device_attr['device_id'],
+            'mqttDevice': 'true',
             'dvcBrandCd': device_attr['device_brand'],
-            'prodName': device_attr['product_name'],
-            'stationCd': '',
-            'resetDttm': '',
             'dvcTypeCd': device_attr['device_type'],
-            'refreshFlag': 'true'
+            'prodName': device_attr['product_name'],
         }
 
-        response = await self._post_endpoint(Endpoint_JSON.STATUS, params)
+        response = await self._get_endpoint(Endpoint_JSON.STATUS, params)
+        if 'error' in response:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier control status. {response["error"]}')
+        if not response['data']:
+            raise CowayError('Coway server failed to return purifier control status.')
         try:
-            control_status = response['body']['controlStatus']
-            net_status = response['body']['netStatus']
+            control_status = response['data']['controlStatus']
+            net_status = response['data']['netStatus']
         except KeyError:
             raise CowayError(f'Coway API error: Coway server failed to return purifier control status.')
         return control_status, net_status
@@ -286,7 +295,11 @@ class CowayClient:
             'membershipYn': 'N',
         }
 
-        response = await self._get_endpoint(Endpoint_JSON.FILTERS, params, use_new_api=True)
+        response = await self._get_endpoint(Endpoint_JSON.FILTERS, params)
+        if 'error' in response:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier quality status. {response["error"]}')
+        if not response['data']:
+            raise CowayError('Coway server failed to return purifier quality status.')
         try:
             filter_list = response['data']['filterList']
             prod_status = response['data']['prodStatus']
@@ -299,15 +312,18 @@ class CowayClient:
         """Returns purifier settings such as pre-filter frequency and smart mode sensitivity."""
 
         params = {
-            'access_token': self.access_token,
-            'dvc_seq': device_attr['device_seq']
+            'dvcSeq': device_attr['device_seq']
         }
 
-        response = await self._post_endpoint(Endpoint_JSON.PROD_SETTINGS, params)
+        response = await self._get_endpoint(Endpoint_JSON.PROD_SETTINGS, params)
+        if 'error' in response:
+            raise CowayError(f'Coway API error: Coway server failed to return purifier settings. {response["error"]}')
+        if not response['data']:
+            raise CowayError('Coway server failed to return purifier settings.')
         try:
-            device_infos = response['body']['deviceInfos']
-            pre_filter_frequency = response['body']['frequency']
-            smart_mode_sensitivity = response['body']['sensitivity']
+            device_infos = response['data']['deviceInfos']
+            pre_filter_frequency = response['data']['frequency']
+            smart_mode_sensitivity = response['data']['sensitivity']
         except KeyError:
             raise CowayError(f'Coway API error: Coway server failed to return purifier settings.')
         return device_infos, pre_filter_frequency, smart_mode_sensitivity
@@ -385,7 +401,7 @@ class CowayClient:
 #####################################################################################################################################################
 
 
-    async def _get(self, url: str, cookies: SimpleCookie | None = None) -> ClientResponse:
+    async def _get(self, url: str) -> ClientResponse:
         """Make GET API call to Coway's servers."""
 
         headers = {
@@ -402,8 +418,8 @@ class CowayClient:
             'dvc_cntry_id': 'US',
             'redirect_uri': Endpoint.REDIRECT_URL
         }
-
-        async with self._session.get(url, cookies=cookies, headers=headers, params=params, timeout=self.timeout) as resp:
+        self._session.cookie_jar.clear()
+        async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
             html_page = await resp.text()
             return resp, html_page
 
@@ -460,23 +476,32 @@ class CowayClient:
         async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
             return await self._response(resp)
 
-    async def _get_endpoint(self, endpoint: str, params: dict[str, Any], use_new_api=False) -> dict[str, Any]:
+    async def _get_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Temp usage of new Coway API."""
 
-        if use_new_api:
-            if endpoint == Endpoint_JSON.FILTERS:
-                url = f'https://iocareapi.iot.coway.com/api/v1/air/devices/{params["barcode"]}/home'
-                headers = {
-                    'content-type': 'application/json',
-                    'profile': 'prod',
-                    'accept': '*/*',
-                    'authorization': f'Bearer {self.access_token}',
-                    'accept-language': Header.ACCEPT_LANG,
-                    'user-agent': Header.USER_AGENT,
-                    'trcode': Endpoint_JSON.FILTERS,
-                }
-                async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
-                    return await self._response(resp, new_api=True)
+        headers = {
+            'content-type': 'application/json',
+            'profile': 'prod',
+            'accept': '*/*',
+            'authorization': f'Bearer {self.access_token}',
+            'accept-language': Header.ACCEPT_LANG,
+            'user-agent': Header.USER_AGENT,
+            'trcode': endpoint,
+        }
+        url: str = ''
+        if endpoint == Endpoint_JSON.DEVICE_LIST:
+            url = 'https://iocareapi.iot.coway.com/api/v1/com/user-devices'
+        if endpoint == Endpoint_JSON.FILTERS:
+            url = f'https://iocareapi.iot.coway.com/api/v1/air/devices/{params["barcode"]}/home'
+        if endpoint == Endpoint_JSON.MCU_VERSION:
+            url = f'https://iocareapi.iot.coway.com/api/v1/com/ota'
+        if endpoint == Endpoint_JSON.STATUS:
+            url = f'https://iocareapi.iot.coway.com/api/v1/com/devices/{params["devId"]}/control'
+        if endpoint == Endpoint_JSON.PROD_SETTINGS:
+            url = 'https://iocareapi.iot.coway.com/api/v1/com/user-device-status'
+
+        async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
+            return await self._response(resp, new_api=True)
 
     async def async_control_purifier(self, device_attr: dict[str, str], command: str, value: Any) -> ClientResponse:
         url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CONTROL + '.json'
@@ -544,14 +569,26 @@ class CowayClient:
     async def _response(resp: ClientResponse, new_api=False) -> dict[str, Any]:
         """Return response from API call."""
 
+        response: dict[str, Any] = {}
         if resp.status != 200:
             error = await resp.text()
-            raise CowayError(f'Coway API error: {error}')
+            if resp.reason == 'Unauthorized':
+                raise AuthError(
+                    f'Coway Auth error: Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.; {error}'
+                )
+            else:
+                response['error'] = error
+                return response
+
         try:
-            response: dict[str, Any] = await resp.json()
-        except Exception as error:
-            raise CowayError(f'Could not return json {error}') from error
+            response = await resp.json()
+        except Exception as resp_error:
+            raise CowayError(f'Could not return json {resp_error}') from resp_error
         if new_api == False:
-            if (header := response['header']['error_code'])  == 'CWIG0304COWAYLgnE':
+            if header := response['header']['error_code']  == 'CWIG0304COWAYLgnE':
                 raise AuthError(f'Error code {header}: Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
+            if error_text := response['header']['error_text']:
+                response['error'] = f'Coway API error: {error_text}, Code: {response["header"]["error_code"]}'
+                return response
+
         return response
