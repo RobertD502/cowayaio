@@ -16,7 +16,7 @@ from cowayaio.exceptions import AuthError, CowayError, PasswordExpired
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
 
-LOGGER = logging.getLogger(__package__)
+LOGGER = logging.getLogger(__name__)
 
 
 class CowayClient:
