@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
 
-from cowayaio.constants import (Endpoint, Endpoint_JSON, ErrorMessages, Header, LightMode, Parameter, TIMEOUT,)
+from cowayaio.constants import (Endpoint, EndpointJSON, ErrorMessages, Header, LightMode, Parameter, TIMEOUT,)
 from cowayaio.exceptions import AuthError, CowayError, PasswordExpired
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
@@ -107,7 +107,7 @@ class CowayClient:
             'serviceCode': Parameter.SERVICE_CODE,
         }
 
-        response = await self._post_endpoint(Endpoint_JSON.GET_TOKEN, params)
+        response = await self._post_endpoint(EndpointJSON.GET_TOKEN, params)
         return response['header']['accessToken'], response['header']['refreshToken']
 
     async def _check_token(self) -> None:
@@ -133,7 +133,7 @@ class CowayClient:
             'authorization': f'Bearer {self.access_token}',
             'accept-language': Header.ACCEPT_LANG,
             'user-agent': Header.USER_AGENT,
-            'trcode': Endpoint_JSON.TOKEN_REFRESH,
+            'trcode': EndpointJSON.TOKEN_REFRESH,
         }
         data = {
             'refreshToken': self.refresh_token,
@@ -153,11 +153,11 @@ class CowayClient:
         }
 
         try:
-            response = await self._get_endpoint(Endpoint_JSON.DEVICE_LIST, params)
+            response = await self._get_endpoint(EndpointJSON.DEVICE_LIST, params)
         except AuthError:
             LOGGER.debug('Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
             await self.login()
-            response = await self._get_endpoint(Endpoint_JSON.DEVICE_LIST, params)
+            response = await self._get_endpoint(EndpointJSON.DEVICE_LIST, params)
         if 'error' in response:
             raise CowayError(f'Failed to get Coway devices. {response["error"]}')
         return response
@@ -287,7 +287,7 @@ class CowayClient:
             'devId': device_attr['device_id'],
         }
 
-        response = await self._get_endpoint(Endpoint_JSON.MCU_VERSION, params)
+        response = await self._get_endpoint(EndpointJSON.MCU_VERSION, params)
         if 'error' in response:
             raise CowayError(f'Coway server failed to return purifier MCU version. {response["error"]}')
         if not response['data']:
@@ -310,7 +310,7 @@ class CowayClient:
             'prodName': device_attr['product_name'],
         }
 
-        response = await self._get_endpoint(Endpoint_JSON.STATUS, params)
+        response = await self._get_endpoint(EndpointJSON.STATUS, params)
         if 'error' in response:
             raise CowayError(f'Coway API error: Coway server failed to return purifier control status. {response["error"]}')
         if not response['data']:
@@ -335,7 +335,7 @@ class CowayClient:
             'membershipYn': 'N',
         }
 
-        response = await self._get_endpoint(Endpoint_JSON.FILTERS, params)
+        response = await self._get_endpoint(EndpointJSON.FILTERS, params)
         if 'error' in response:
             raise CowayError(f'Coway API error: Coway server failed to return purifier quality status. {response["error"]}')
         if not response['data']:
@@ -355,7 +355,7 @@ class CowayClient:
             'dvcSeq': device_attr['device_seq']
         }
 
-        response = await self._get_endpoint(Endpoint_JSON.PROD_SETTINGS, params)
+        response = await self._get_endpoint(EndpointJSON.PROD_SETTINGS, params)
         if 'error' in response:
             raise CowayError(f'Coway API error: Coway server failed to return purifier settings. {response["error"]}')
         if not response['data']:
@@ -563,15 +563,15 @@ class CowayClient:
             'trcode': endpoint,
         }
         url: str = ''
-        if endpoint == Endpoint_JSON.DEVICE_LIST:
+        if endpoint == EndpointJSON.DEVICE_LIST:
             url = f'{Endpoint.NEW_BASE_URI}{Endpoint.DEVICE_LIST}'
-        if endpoint == Endpoint_JSON.FILTERS:
+        if endpoint == EndpointJSON.FILTERS:
             url = f'{Endpoint.NEW_BASE_URI}{Endpoint.FILTERS}{params["barcode"]}{Endpoint.HOME}'
-        if endpoint == Endpoint_JSON.MCU_VERSION:
+        if endpoint == EndpointJSON.MCU_VERSION:
             url = f'{Endpoint.NEW_BASE_URI}{Endpoint.MCU_VERSION}'
-        if endpoint == Endpoint_JSON.STATUS:
+        if endpoint == EndpointJSON.STATUS:
             url = f'{Endpoint.NEW_BASE_URI}{Endpoint.COMMON_DEVICES}{params["devId"]}{Endpoint.CONTROL}'
-        if endpoint == Endpoint_JSON.PROD_SETTINGS:
+        if endpoint == EndpointJSON.PROD_SETTINGS:
             url = f'{Endpoint.NEW_BASE_URI}{Endpoint.PROD_SETTINGS}'
 
         async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
@@ -581,7 +581,7 @@ class CowayClient:
         """Main function to execute individual purifier control commands."""
 
         await self._check_token()
-        url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CONTROL + '.json'
+        url = f'{Endpoint.BASE_URI}/{EndpointJSON.CONTROL}.json'
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
@@ -598,7 +598,7 @@ class CowayClient:
             }],
             'mqttDevice': True
         }
-        message = await self._construct_control_message(Endpoint_JSON.CONTROL, params)
+        message = await self._construct_control_message(EndpointJSON.CONTROL, params)
         data = {
             'message': json.dumps(message)
         }
@@ -611,7 +611,7 @@ class CowayClient:
         """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
 
         await self._check_token()
-        url = Endpoint.BASE_URI + '/' + Endpoint_JSON.CHANGE_PRE_FILTER + '.json'
+        url = f'{Endpoint.BASE_URI}/{EndpointJSON.CHANGE_PRE_FILTER}.json'
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Accept': 'application/json',
@@ -622,7 +622,7 @@ class CowayClient:
             'comdVal': value,
             'mqttDevice': False
         }
-        message = await self._construct_control_message(Endpoint_JSON.CHANGE_PRE_FILTER, params)
+        message = await self._construct_control_message(EndpointJSON.CHANGE_PRE_FILTER, params)
         data = {
             'message': json.dumps(message)
         }
