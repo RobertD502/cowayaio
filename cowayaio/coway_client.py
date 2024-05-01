@@ -143,6 +143,7 @@ class CowayClient:
             response = await self._response(resp, new_api=True)
             self.access_token = response['data']['accessToken']
             self.refresh_token = response['data']['refreshToken']
+            self.token_expiration = datetime.now() + timedelta(seconds=3600)
 
     async def async_get_purifiers(self) -> dict[str, Any]:
         """Gets all purifiers linked to Coway account."""
