@@ -52,9 +52,9 @@ class CowayClient:
         """Get openid-connect login url and associated cookies."""
 
         response, html_page = await self._get(Endpoint.OAUTH_URL)
-        if response.status != 200:
-            error = response.text()
-            raise CowayError(f'Coway API error while fetching login page: {error}')
+        if (status := response.status) != 200:
+            error = response.reason
+            raise CowayError(f'Coway API error while fetching login page. Status: {status}, Reason: {error}')
         cookies = response.cookies
         soup = BeautifulSoup(html_page, 'html.parser')
         try:
@@ -71,6 +71,7 @@ class CowayClient:
             'User-Agent': Header.USER_AGENT
         }
         data = {
+            'clientName': Parameter.CLIENT_NAME,
             'termAgreementStatus': '',
             'idp': '',
             'username': self.username,
@@ -98,17 +99,13 @@ class CowayClient:
     async def _get_token(self, auth_code: str) -> tuple[str, str]:
         """Get access token and refresh token."""
 
-        params = {
+        data = {
             'authCode': auth_code,
-            'isMobile': 'M',
-            'langCd': 'en',
-            'osType': 1,
             'redirectUrl': Endpoint.REDIRECT_URL,
-            'serviceCode': Parameter.SERVICE_CODE,
         }
 
-        response = await self._post_endpoint(EndpointJSON.GET_TOKEN, params)
-        return response['header']['accessToken'], response['header']['refreshToken']
+        response = await self._post_endpoint(data)
+        return response['data']['accessToken'], response['data']['refreshToken']
 
     async def _check_token(self) -> None:
         """Checks to see if token has expired and needs to be refreshed."""
@@ -386,6 +383,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Power command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute power command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute power command. Response: {response}'
+            )
 
     async def async_set_auto_mode(self, device_attr: dict[str, str]) -> None:
         """Set Purifier to Auto Mode."""
@@ -394,6 +401,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Auto mode command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute auto mode command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute auto mode command. Response: {response}'
+            )
 
     async def async_set_night_mode(self, device_attr: dict[str, str]) -> None:
         """Set Purifier to Night Mode."""
@@ -402,6 +419,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Night mode command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute night mode command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute night mode command. Response: {response}'
+            )
 
     async def async_set_eco_mode(self, device_attr: dict[str, str]) -> None:
         """Set Purifier to Eco Mode.
@@ -412,6 +439,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Eco mode command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute eco mode command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute eco mode command. Response: {response}'
+            )
 
     async def async_set_rapid_mode(self, device_attr: dict[str, str]) -> None:
         """Set Purifier to Rapid Mode.
@@ -422,6 +459,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Rapid mode command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute rapid mode command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute rapid mode command. Response: {response}'
+            )
 
     async def async_set_fan_speed(self, device_attr: dict[str, str], speed: str) -> None:
         """Speed can be 1, 2, or 3 represented as a string."""
@@ -430,6 +477,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Fan speed command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute fan speed command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute fan speed command. Response: {response}'
+            )
 
     async def async_set_light(self, device_attr: dict[str, str], light_on: bool) -> None:
         """Provide light_on as True for On and False for Off.
@@ -440,6 +497,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Light command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute light command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute light command. Response: {response}'
+            )
 
     async def async_set_light_mode(self, device_attr: dict[str, str], light_mode: LightMode) -> None:
         """Sets light mode for purifiers, like the 250s,
@@ -451,6 +518,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Light command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute light mode command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute light mode command. Response: {response}'
+            )
 
     async def async_set_timer(self, device_attr: dict[str, str], time: str) -> None:
         """Time, in minutes, can be 0, 60, 120, 240, or 480 represented as a string. A time of 0 sets the timer to off."""
@@ -459,6 +536,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Timer command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute set timer command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute set timer command. Response: {response}'
+            )
 
     async def async_set_smart_mode_sensitivity(self, device_attr: dict[str, str], sensitivity: str) -> None:
         """Sensitivity can be 1, 2, or 3. 1 = Sensitive, 2 = Normal, 3 = Insensitive. """
@@ -467,6 +554,16 @@ class CowayClient:
         LOGGER.debug(
             f'{device_attr.get("name")} - Sensitivity command sent. Response: {response}'
         )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute smart mode sensitivity command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute smart mode sensitivity command. Response: {response}'
+            )
 
 
 #####################################################################################################################################################
@@ -519,36 +616,20 @@ class CowayClient:
                 password_skip_init = False
                 return resp, password_skip_init
 
-    async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _post_endpoint(self, data: dict[str, str]) -> dict[str, Any]:
         """Used exclusively by _get_token function."""
 
-        url = f'{Endpoint.BASE_URI}/{endpoint}.json'
+        url = f'{Endpoint.NEW_BASE_URI}{Endpoint.GET_TOKEN}'
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': Header.CONTENT_JSON,
             'User-Agent': Header.USER_AGENT,
+            'accept-language': Header.ACCEPT_LANG,
+            'profile': 'prod',
+            'trcode': EndpointJSON.GET_TOKEN
         }
 
-        message = {
-            'header': {
-                'result': False,
-                'error_code': '',
-                'error_text': '',
-                'info_text': '',
-                'message_version': '',
-                'login_session_id': '',
-                'trcode': endpoint,
-                'accessToken': '',
-                'refreshToken': '',
-            },
-            'body': params
-        }
-        data = {
-            'message': json.dumps(message)
-        }
-
-        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
-            return await self._response(resp)
+        async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
+            return await self._response(resp, new_api=True)
 
     async def _get_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Temp usage of new Coway API."""
@@ -582,70 +663,63 @@ class CowayClient:
         """Main function to execute individual purifier control commands."""
 
         await self._check_token()
-        url = f'{Endpoint.BASE_URI}/{EndpointJSON.CONTROL}.json'
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': Header.USER_AGENT
-        }
-        params = {
-            'barcode': device_attr.get('device_id'),
-            'dvcBrandCd': device_attr.get('device_brand'),
-            'prodName': device_attr.get('product_name'),
+        url = f'{Endpoint.NEW_BASE_URI}{Endpoint.CONTROL_DEVICE}'
+        headers = await self._construct_control_header(EndpointJSON.CONTROL)
+        data = {
+            'devId': device_attr.get('device_id'),
             'dvcTypeCd': device_attr.get('device_type'),
             'funcList': [{
-              'comdVal': value,
+              'cmdVal': value,
               'funcId': command
             }],
-            'mqttDevice': True
-        }
-        message = await self._construct_control_message(EndpointJSON.CONTROL, params)
-        data = {
-            'message': json.dumps(message)
+            'isMultiControl': False
         }
 
-        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
+        async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
             response = await self._control_command_response(resp)
             return response
 
-    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str) -> None:
+    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: int) -> None:
         """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
 
         await self._check_token()
-        url = f'{Endpoint.BASE_URI}/{EndpointJSON.CHANGE_PRE_FILTER}.json'
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            'User-Agent': Header.USER_AGENT
-        }
-        params = {
-            'barcode': device_attr.get('device_id'),
-            'comdVal': value,
-            'mqttDevice': False
-        }
-        message = await self._construct_control_message(EndpointJSON.CHANGE_PRE_FILTER, params)
+        url = f'{Endpoint.NEW_BASE_URI}{Endpoint.FILTERS}{device_attr["device_id"]}{Endpoint.CLEAN_CYCLE}'
+        headers = await self._construct_control_header(EndpointJSON.CHANGE_PRE_FILTER)
         data = {
-            'message': json.dumps(message)
+            'comdVal': value,
+            'devId': device_attr.get('device_id'),
         }
 
-        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
+        async with self._session.put(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
             response = await self._control_command_response(resp)
             LOGGER.debug(
                 f'{device_attr.get("name")} - Prefilter command sent. Response: {response}'
             )
+            if isinstance(response, dict):
+                if 'header' in response:
+                    if 'error_code' in response['header']:
+                        raise CowayError(
+                            f'Failed to execute Prefilter command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                        )
+            else:
+                raise CowayError(
+                    f'Failed to execute Prefilter command. Response: {response}'
+                )
 
-    async def _construct_control_message(self, json_endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Create message dict used by control and prefilter setting functions."""
+    async def _construct_control_header(self, trcode: str) -> dict[str, Any]:
+        """Construct header used by control purifier function
+        and prefilter control function
+        """
 
-        message = {
-            'header': {
-                'trcode': json_endpoint,
-                'accessToken': self.access_token,
-                'refreshToken': self.refresh_token
-            },
-            'body': params
+        headers = {
+            'Content-Type': Header.CONTENT_JSON,
+            'Accept': '*/*',
+            'accept-language': Header.ACCEPT_LANG,
+            'User-Agent': Header.USER_AGENT,
+            'trcode': trcode,
+            'authorization': f'Bearer {self.access_token}'
         }
-        return message
+        return headers
 
     @staticmethod
     async def _response(resp: ClientResponse, new_api=False) -> dict[str, Any]:
@@ -679,9 +753,9 @@ class CowayClient:
         except Exception as resp_error:
             raise CowayError(f'Could not return json {resp_error}') from resp_error
         if not new_api:
-            if header := response['header']['error_code']  == 'CWIG0304COWAYLgnE':
+            if (header := response['header']['error_code'])  == 'CWIG0304COWAYLgnE':
                 raise AuthError(f'Error code {header}: Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
-            if error_text := response['header']['error_text']:
+            if (error_text := response['header']['error_text']):
                 response['error'] = f'Coway API error: {error_text}, Code: {response["header"]["error_code"]}'
                 return response
         # Sometimes an unauthorized message is returned with a 200 status
@@ -702,4 +776,6 @@ class CowayClient:
         except Exception:
             response = await resp.text()
             return response
+        if resp.status != 200:
+            response = await resp.text()
         return response
