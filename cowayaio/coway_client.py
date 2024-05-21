@@ -690,7 +690,7 @@ class CowayClient:
             'devId': device_attr.get('device_id'),
         }
 
-        async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
+        async with self._session.put(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
             response = await self._control_command_response(resp)
             LOGGER.debug(
                 f'{device_attr.get("name")} - Prefilter command sent. Response: {response}'
