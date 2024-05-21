@@ -679,8 +679,11 @@ class CowayClient:
             response = await self._control_command_response(resp)
             return response
 
-    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str) -> None:
-        """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
+    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str, return_error: bool = False) -> None:
+        """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4.
+        return_error: if you want to return the error instead of exception being
+        raised.
+        """
 
         await self._check_token()
         url = f'{Endpoint.NEW_BASE_URI}{Endpoint.FILTERS}{device_attr["device_id"]}{Endpoint.CLEAN_CYCLE}'
@@ -698,14 +701,17 @@ class CowayClient:
             if isinstance(response, dict):
                 if 'header' in response:
                     if 'error_code' in response['header']:
-                        raise CowayError(
-                            f'Failed to execute Prefilter command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
-                        )
-            if isinstance(response, str):
-                LOGGER.error("Exception is being raised")
-                raise CowayError(
-                    f'Failed to execute Prefilter command. Response: {response}'
-                )
+                        message = f'Failed to execute Prefilter command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
+                        if return_error:
+                            return message
+                        else:
+                            raise CowayError(message)
+            else:
+                message = f'Failed to execute Prefilter command. Response: {response}'
+                if return_error:
+                    return message
+                else:
+                    raise CowayError(message)
 
     async def _construct_control_header(self, trcode: str) -> dict[str, Any]:
         """Construct header used by control purifier function
