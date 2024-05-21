@@ -679,7 +679,7 @@ class CowayClient:
             response = await self._control_command_response(resp)
             return response
 
-    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: str) -> None:
+    async def async_change_prefilter_setting(self, device_attr: dict[str, str], value: int) -> None:
         """ Used to change the pre-filter wash frequency. Value can be 2, 3, or 4."""
 
         await self._check_token()
