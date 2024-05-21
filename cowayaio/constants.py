@@ -5,12 +5,15 @@ from .str_enum import StrEnum
 class Endpoint(StrEnum):
 
     BASE_URI = 'https://iocareapp.coway.com/bizmob.iocare'
+    CLEAN_CYCLE = '/clean-cycle'
     COMMON_DEVICES = '/com/devices/'
     CONTROL = '/control'
+    CONTROL_DEVICE = '/com/control-device'
     DEVICE_LIST = '/com/user-devices'
     FILTERS = '/air/devices/'
     GET_TOKEN = '/com/token'
     HOME = '/home'
+    INITIAL_LOGIN = '/com/login-info'
     MCU_VERSION = '/com/ota'
     NEW_BASE_URI = 'https://iocareapi.iot.coway.com/api/v1'
     OAUTH_URL = "https://id.coway.com/auth/realms/cw-account/protocol/openid-connect/auth"
@@ -21,7 +24,7 @@ class Endpoint(StrEnum):
 
 class Parameter(StrEnum):
 
-    APP_VERSION = "2.3.33"
+    APP_VERSION = "2.3.36"
     CLIENT_ID = "cwid-prd-iocare-20240327"
     SERVICE_CODE = "com.coway.IOCareKor"
     CLIENT_NAME = "IOCARE"
@@ -42,6 +45,7 @@ class EndpointJSON(StrEnum):
     DEVICE_LIST = 'CWIG0304'
     FILTERS = 'CWIA0120'
     GET_TOKEN = 'CWCC0009'
+    INITIAL_LOGIN = 'CWIL0100'
     MCU_VERSION = "CWIG0615"
     PROD_SETTINGS = "CWIG0301"
     STATUS = 'CWIG0602'
