@@ -52,9 +52,9 @@ class CowayClient:
         """Get openid-connect login url and associated cookies."""
 
         response, html_page = await self._get(Endpoint.OAUTH_URL)
-        if response.status != 200:
-            error = response.text()
-            raise CowayError(f'Coway API error while fetching login page: {error}')
+        if (status := response.status) != 200:
+            error = response.reason
+            raise CowayError(f'Coway API error while fetching login page. Status: {status}, Reason: {error}')
         cookies = response.cookies
         soup = BeautifulSoup(html_page, 'html.parser')
         try:
@@ -71,6 +71,7 @@ class CowayClient:
             'User-Agent': Header.USER_AGENT
         }
         data = {
+            'clientName': Parameter.CLIENT_NAME,
             'termAgreementStatus': '',
             'idp': '',
             'username': self.username,
@@ -98,17 +99,13 @@ class CowayClient:
     async def _get_token(self, auth_code: str) -> tuple[str, str]:
         """Get access token and refresh token."""
 
-        params = {
+        data = {
             'authCode': auth_code,
-            'isMobile': 'M',
-            'langCd': 'en',
-            'osType': 1,
             'redirectUrl': Endpoint.REDIRECT_URL,
-            'serviceCode': Parameter.SERVICE_CODE,
         }
 
-        response = await self._post_endpoint(EndpointJSON.GET_TOKEN, params)
-        return response['header']['accessToken'], response['header']['refreshToken']
+        response = await self._post_endpoint(data)
+        return response['data']['accessToken'], response['data']['refreshToken']
 
     async def _check_token(self) -> None:
         """Checks to see if token has expired and needs to be refreshed."""
@@ -519,36 +516,20 @@ class CowayClient:
                 password_skip_init = False
                 return resp, password_skip_init
 
-    async def _post_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _post_endpoint(self, data: dict[str, str]) -> dict[str, Any]:
         """Used exclusively by _get_token function."""
 
-        url = f'{Endpoint.BASE_URI}/{endpoint}.json'
+        url = f'{Endpoint.NEW_BASE_URI}{Endpoint.GET_TOKEN}'
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': Header.CONTENT_JSON,
             'User-Agent': Header.USER_AGENT,
+            'accept-language': Header.ACCEPT_LANG,
+            'profile': 'prod',
+            'trcode': EndpointJSON.GET_TOKEN
         }
 
-        message = {
-            'header': {
-                'result': False,
-                'error_code': '',
-                'error_text': '',
-                'info_text': '',
-                'message_version': '',
-                'login_session_id': '',
-                'trcode': endpoint,
-                'accessToken': '',
-                'refreshToken': '',
-            },
-            'body': params
-        }
-        data = {
-            'message': json.dumps(message)
-        }
-
-        async with self._session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
-            return await self._response(resp)
+        async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
+            return await self._response(resp, new_api=True)
 
     async def _get_endpoint(self, endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
         """Temp usage of new Coway API."""
@@ -679,9 +660,9 @@ class CowayClient:
         except Exception as resp_error:
             raise CowayError(f'Could not return json {resp_error}') from resp_error
         if not new_api:
-            if header := response['header']['error_code']  == 'CWIG0304COWAYLgnE':
+            if (header := response['header']['error_code'])  == 'CWIG0304COWAYLgnE':
                 raise AuthError(f'Error code {header}: Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
-            if error_text := response['header']['error_text']:
+            if (error_text := response['header']['error_text']):
                 response['error'] = f'Coway API error: {error_text}, Code: {response["header"]["error_code"]}'
                 return response
         # Sometimes an unauthorized message is returned with a 200 status
