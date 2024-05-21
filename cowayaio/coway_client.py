@@ -701,7 +701,7 @@ class CowayClient:
                         raise CowayError(
                             f'Failed to execute Prefilter command. Error code: {response["header"]["error_code"]}, Error message: {response["header"]["error_text"]}'
                         )
-            else:
+            if isinstance(response, str):
                 LOGGER.error("Exception is being raised")
                 raise CowayError(
                     f'Failed to execute Prefilter command. Response: {response}'
