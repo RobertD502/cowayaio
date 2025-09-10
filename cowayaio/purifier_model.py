@@ -23,26 +23,19 @@ class CowayPurifier:
     eco_mode: bool
     night_mode: bool
     rapid_mode: bool
-    fan_speed: str | None
+    fan_speed: int | None
     light_on: bool
-    light_mode: str
+    light_mode: int
     timer: str | None
-    timer_remaining: str | None
-    pre_filter_name: str
+    timer_remaining: int | None
     pre_filter_pct: int
-    pre_filter_last_changed: str
-    pre_filter_change_months: str
-    max2_name: str
     max2_pct: int
-    max2_last_changed: str
-    max2_change_months: str
-    dust_pollution: str
-    air_volume: str
-    pollen_mode: str
-    particulate_matter_2_5: str
-    particulate_matter_10: str
-    carbon_dioxide: str
-    volatile_organic_compounds: str
-    air_quality_index: str
+    aq_grade: int
+    particulate_matter_2_5: int | None
+    particulate_matter_10: int | None
+    carbon_dioxide: int | None
+    volatile_organic_compounds: int | None
+    air_quality_index: int | None
+    lux_sensor: int | None
     pre_filter_change_frequency: int
     smart_mode_sensitivity: int
