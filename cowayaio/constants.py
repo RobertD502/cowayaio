@@ -4,57 +4,43 @@ from .str_enum import StrEnum
 
 class Endpoint(StrEnum):
 
-    BASE_URI = 'https://iocareapp.coway.com/bizmob.iocare'
-    CLEAN_CYCLE = '/clean-cycle'
-    COMMON_DEVICES = '/com/devices/'
-    CONTROL = '/control'
-    CONTROL_DEVICE = '/com/control-device'
-    DEVICE_LIST = '/com/user-devices'
-    FILTERS = '/air/devices/'
+    BASE_URI = 'https://iocare.iotsvc.coway.com/api/v1'
     GET_TOKEN = '/com/token'
-    HOME = '/home'
-    INITIAL_LOGIN = '/com/login-info'
-    MCU_VERSION = '/com/ota'
-    NEW_BASE_URI = 'https://iocareapi.iot.coway.com/api/v1'
     OAUTH_URL = "https://id.coway.com/auth/realms/cw-account/protocol/openid-connect/auth"
-    PROD_SETTINGS = '/com/user-device-status'
-    REDIRECT_URL = "https://iocare-redirect.iot.coway.com/redirect_bridge.html"
-    TOKEN_REFRESH = "https://iocareapi.iot.coway.com/api/v1/com/refresh-token"
+    REDIRECT_URL = "https://iocare-redirect.iotsvc.coway.com/redirect_bridge_empty.html"
+    TOKEN_REFRESH = "/com/refresh-token"
+    USER_INFO = "/com/my-info"
+    PLACES = "/com/places"
+    AIR = "/air/devices"
+    PURIFIER_HTML_BASE = "https://iocare2.coway.com/en"
+    SECONDARY_BASE = "https://iocare2.coway.com/api/proxy/api/v1"
 
 
 class Parameter(StrEnum):
 
-    APP_VERSION = "2.3.36"
-    CLIENT_ID = "cwid-prd-iocare-20240327"
-    SERVICE_CODE = "com.coway.IOCareKor"
+    APP_VERSION = "2.15.0"
+    CLIENT_ID = "cwid-prd-iocare-plus-25MJGcYX"
     CLIENT_NAME = "IOCARE"
+    TIMEZONE = "America/Kentucky/Louisville"
 
 
 class Header(StrEnum):
 
     ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    ACCEPT_LANG = "en-US,en;q=0.9"
-    USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Version/10.0 Safari/602.1"
+    ACCEPT_LANG = "en"
+    CALLING_PAGE = 'product'
     CONTENT_JSON = "application/json"
-
-
-class EndpointJSON(StrEnum):
-
-    CHANGE_PRE_FILTER = "CWIA0600"
-    CONTROL = 'CWIG0603'
-    DEVICE_LIST = 'CWIG0304'
-    FILTERS = 'CWIA0120'
-    GET_TOKEN = 'CWCC0009'
-    INITIAL_LOGIN = 'CWIL0100'
-    MCU_VERSION = "CWIG0615"
-    PROD_SETTINGS = "CWIG0301"
-    STATUS = 'CWIG0602'
-    TOKEN_REFRESH = 'CWCC0010'
+    COWAY_LANGUAGE = "en-US,en;q=0.9"
+    COWAY_USER_AGENT = "IoCare/1 CFNetwork/3826.500.131 Darwin/24.5.0"
+    HTML_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148CowayAppCore"
+    SOURCE_PATH = 'iOS'
+    THEME = 'light'
+    USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 app iocare"
 
 
 class ErrorMessages(StrEnum):
 
-    BAD_TOKEN = 'Unauthenticated (Missing or malformed JWT)'
+    BAD_TOKEN = 'Unauthenticated (crypto/rsa: verification error)'
     EXPIRED_TOKEN = 'Unauthenticated (Token is expired)'
     INVALID_REFRESH_TOKEN = '통합회원 토큰 갱신 오류 (error: invalid_grant)(error_desc: Invalid refresh token)'
 
@@ -66,4 +52,10 @@ class LightMode(StrEnum):
     ON = '0'
 
 
+CATEGORY_NAME = '청정기'  # Translates to purifier
+PREFILTER_CYCLE = {
+    2: '112',
+    3: '168',
+    4: '224'
+}
 TIMEOUT = 5 * 60
