@@ -210,6 +210,8 @@ class CowayClient:
     async def async_get_purifiers_data(self) -> PurifierData:
         """Return dataclass with Purifier Devices."""
 
+        if not self.places:
+            await self.login()
         purifiers = await self.async_get_purifiers()
         #  Prevent checking access token for every purifier iteration after it has
         #  already been checked once.
