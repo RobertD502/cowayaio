@@ -6,6 +6,8 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import logging
+import re
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from aiohttp import ClientResponse, ClientSession
@@ -50,8 +52,9 @@ class CowayClient:
         self.token_expiration: datetime | None = None
         self.country_code: str | None = None
         self.places: list[dict[str, Any]] | None = None
-        self.check_token = True
+        self.check_token: bool = True
         self.timeout: int = timeout
+        self.server_maintenance: dict[str, str] | None = None
 
     async def login(self) -> None:
         login_url, cookies = await self._get_login_cookies()
@@ -216,6 +219,7 @@ class CowayClient:
         #  Prevent checking access token for every purifier iteration after it has
         #  already been checked once.
         self.check_token = False
+        await self.async_server_maintenance_notice()
         device_data: dict[str, CowayPurifier] = {}
         for dev in purifiers:
             purifier_html = await self._get_purifier_html(
@@ -355,6 +359,86 @@ class CowayClient:
         #  commands are sent
         self.check_token = True
         return PurifierData(purifiers=device_data)
+
+    async def async_server_maintenance_notice(self) -> None:
+        """Fetch latest notice regarding Coway server maintenance."""
+
+        if self.check_token:
+            await self._check_token()
+        url = f'{Endpoint.BASE_URI}{Endpoint.NOTICES}'
+        headers = {
+            'accept': '*/*',
+            'langCd': Header.ACCEPT_LANG,
+            'ostype': Header.SOURCE_PATH,
+            'appVersion': Parameter.APP_VERSION,
+            'region': 'NUS',
+            'user-agent': Header.COWAY_USER_AGENT,
+            'authorization': f'Bearer {self.access_token}',
+        }
+        params = {
+            'content': '',
+            'langCd': Header.ACCEPT_LANG,
+            'pageIndex': '1',
+            'pageSize': '20',
+            'title': '',
+            'topPinnedYn': ''
+        }
+        list_response = await self._get_endpoint(url, headers, params)
+        if 'error' in list_response:
+            raise CowayError(f'Failed to get Coway server maintenance notices: {list_response["error"]}')
+        notice_check = list_response["data"]["content"][0]["noticeSeq"]
+        if not self.server_maintenance or notice_check != self.server_maintenance['sequence']:
+            url = f'{Endpoint.BASE_URI}{Endpoint.NOTICES}/{list_response["data"]["content"][0]["noticeSeq"]}'
+            headers = {
+                'region': 'NUS',
+                'accept': 'application/json, text/plain, */*',
+                'user-agent': Header.HTML_USER_AGENT,
+                'authorization': f'Bearer {self.access_token}',
+            }
+            params = {
+                'langCd': Header.ACCEPT_LANG
+            }
+            latest_notice = await self._get_endpoint(url, headers, params)
+            if 'error' in latest_notice:
+                raise CowayError(f'Failed to get Coway server maintenance latest notice: {latest_notice["error"]}')
+            soup = BeautifulSoup(latest_notice['data']['content'], 'html.parser')
+            notice_text = soup.find_all('p')
+            notice_lines: list[str] = []
+            search_result: tuple[int, ...] | None = None
+            for content in notice_text:
+                if content.text != u'\xa0':
+                    notice_lines.append(content.text)
+                    if '[edt]' in (lower_text := content.text.lower()):
+                        pattern = r'\[edt\].*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2}).*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2})'
+                        search_result = re.search(pattern, lower_text).groups()
+
+            notice_info: str = '\n'.join(notice_lines)
+            if search_result and len(search_result) == 4:
+                format_string = '%Y-%m-%d %H:%M'
+                start_dt_string = f'{search_result[0]} {search_result[1]}'
+                end_dt_string = f'{search_result[2]} {search_result[3]}'
+                edt_tz = ZoneInfo('America/New_York')
+                start_dt = datetime.strptime(
+                    start_dt_string, format_string
+                ).replace(tzinfo=edt_tz)
+                end_dt = datetime.strptime(
+                    end_dt_string, format_string
+                ).replace(tzinfo=edt_tz)
+                self.server_maintenance = {
+                    'sequence': latest_notice['data']['noticeSeq'],
+                    'start_date_time': start_dt,
+                    'end_date_time': end_dt,
+                    'description': notice_info
+                }
+            else:
+                self.server_maintenance = {
+                    'sequence': None,
+                    'start_date_time': None,
+                    'end_date_time': None,
+                    'description': notice_info
+                }
+        else:
+            return
 
     async def async_fetch_filter_status(
             self,
@@ -668,7 +752,7 @@ class CowayClient:
             self,
             endpoint: str,
             headers: dict[str, str],
-            params: dict[str, Any] | None
+            params: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Get authorized endpoints."""
 
