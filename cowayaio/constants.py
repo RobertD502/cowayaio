@@ -6,6 +6,7 @@ class Endpoint(StrEnum):
 
     BASE_URI = 'https://iocare.iotsvc.coway.com/api/v1'
     GET_TOKEN = '/com/token'
+    NOTICES = '/com/notices'
     OAUTH_URL = "https://id.coway.com/auth/realms/cw-account/protocol/openid-connect/auth"
     REDIRECT_URL = "https://iocare-redirect.iotsvc.coway.com/redirect_bridge_empty.html"
     TOKEN_REFRESH = "/com/refresh-token"
