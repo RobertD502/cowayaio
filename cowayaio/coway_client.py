@@ -23,7 +23,7 @@ from cowayaio.constants import (
     PREFILTER_CYCLE,
     TIMEOUT,
 )
-from cowayaio.exceptions import AuthError, CowayError, PasswordExpired
+from cowayaio.exceptions import AuthError, CowayError, PasswordExpired, ServerMaintenance
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
 
@@ -54,9 +54,10 @@ class CowayClient:
         self.places: list[dict[str, Any]] | None = None
         self.check_token: bool = True
         self.timeout: int = timeout
-        self.server_maintenance: dict[str, str] | None = None
+        self.server_maintenance: dict[str, Any] | None = None
 
     async def login(self) -> None:
+
         login_url, cookies = await self._get_login_cookies()
         auth_code = await self._get_auth_code(login_url, cookies)
         self.access_token, self.refresh_token = await self._get_token(auth_code)
@@ -71,7 +72,13 @@ class CowayClient:
         response, html_page = await self._get(Endpoint.OAUTH_URL)
         if (status := response.status) != 200:
             error = response.reason
-            raise CowayError(f'Coway API error while fetching login page. Status: {status}, Reason: {error}')
+            if status == 503:
+                raise ServerMaintenance(
+                    f'Coway Servers are undergoing maintenance. Response: {error}'
+                )
+            raise CowayError(
+                f'Coway API error while fetching login page. Status: {status}, Reason: {error}'
+            )
         cookies = response.cookies
         soup = BeautifulSoup(html_page, 'html.parser')
         try:
@@ -163,6 +170,11 @@ class CowayClient:
         endpoint = f'{Endpoint.BASE_URI}{Endpoint.USER_INFO}'
         headers = await self._create_endpoint_header()
         response = await self._get_endpoint(endpoint=endpoint, headers=headers, params=None)
+        if 'data' in response:
+            if 'maintainInfos' in response['data']:
+                raise ServerMaintenance(
+                    f'Coway Servers are undergoing maintenance.'
+                )
         if 'error' in response:
             raise CowayError(f'Failed to get country code associated with account. {response["error"]}')
         return response['data']['memberInfo']['countryCode']
@@ -307,12 +319,20 @@ class CowayClient:
             rapid_mode = parsed_info['status_info']['0002'] == 5
             fan_speed = parsed_info['status_info']['0003']
             light_on = parsed_info['status_info']['0007'] == 2
-            # 250s purifier has more than just on and off
+            # 250s/IconS purifier has more than just on and off
             light_mode = parsed_info['status_info']['0007']
+            button_lock = parsed_info['status_info'].get('0024', None)
             timer = parsed_info['timer_info']
             timer_remaining = parsed_info['status_info']['0008']
-            pre_filter_pct = parsed_info['filter_info']['pre-filter']['filterRemain']
-            max2_pct = parsed_info['filter_info']['max2']['filterRemain']
+            if parsed_info['filter_info']:
+                pre_filter_pct = parsed_info['filter_info']['pre-filter']['filterRemain']
+                max2_pct = parsed_info['filter_info']['max2']['filterRemain']
+                pre_filter_change_frequency = parsed_info['filter_info']['pre-filter']['replaceCycle']
+            else:
+                # 250S filter endpoint is currently under development by Coway
+                pre_filter_pct = 100 - parsed_info['sensor_info']['0011']
+                max2_pct = 100 - parsed_info['sensor_info']['0012']
+                pre_filter_change_frequency = None
             aq_grade = parsed_info['aq_grade']['iaqGrade']
             if '0001' in parsed_info['sensor_info']:
                 particulate_matter_2_5 = parsed_info['sensor_info']['0001']
@@ -325,8 +345,7 @@ class CowayClient:
             carbon_dioxide = parsed_info['sensor_info'].get('CO2_IDX', None)
             volatile_organic_compounds = parsed_info['sensor_info'].get('VOCs_IDX', None)
             air_quality_index = parsed_info['sensor_info'].get('IAQ', None)
-            lux_sensor = parsed_info['sensor_info'].get('0007', None)  # raw value has units of lx. Likely only on 400S
-            pre_filter_change_frequency = parsed_info['filter_info']['pre-filter']['replaceCycle']
+            lux_sensor = parsed_info['sensor_info'].get('0007', None)  # raw value has units of lx. For 250S and 400S.
             smart_mode_sensitivity = parsed_info['status_info']['000A']
             device_data[device_attr['device_id']] = CowayPurifier(
                 device_attr=device_attr,
@@ -341,6 +360,7 @@ class CowayClient:
                 fan_speed=fan_speed,
                 light_on=light_on,
                 light_mode=light_mode,
+                button_lock=button_lock,
                 timer=timer,
                 timer_remaining=timer_remaining,
                 pre_filter_pct=pre_filter_pct,
@@ -686,6 +706,26 @@ class CowayClient:
                 f'Failed to execute smart mode sensitivity command. Response: {response}'
             )
 
+    async def async_set_button_lock(self, device_attr: dict[str, str], value: str) -> None:
+        """Set button lock to ON (1) or OFF (0)."""
+
+        response = await self.async_control_purifier(device_attr, '0024', value=value)
+        LOGGER.debug(
+            f'{device_attr.get("name")} - Button lock command sent. Response: {response}'
+        )
+        if isinstance(response, dict):
+            if 'header' in response:
+                if 'error_code' in response['header']:
+                    raise CowayError(
+                        f'Failed to execute button lock command. '
+                        f'Error code: {response["header"]["error_code"]}, '
+                        f'Error message: {response["header"]["error_text"]}'
+                    )
+        else:
+            raise CowayError(
+                f'Failed to execute button lock command. Response: {response}'
+            )
+
 
 #####################################################################################################################################################
 
@@ -906,7 +946,11 @@ class CowayClient:
             response = await resp.json()
         except Exception as resp_error:
             raise CowayError(f'Could not return json {resp_error}') from resp_error
-
+        if 'data' in response:
+            if 'maintainInfos' in response['data']:
+                raise ServerMaintenance(
+                    f'Coway Servers are undergoing maintenance.'
+                )
         #  Sometimes an unauthorized message is returned with a 200 status,
         #  and we need to handle it separately.
         if 'error' in response:
@@ -929,4 +973,9 @@ class CowayClient:
             return response
         if resp.status != 200:
             response = await resp.text()
+        if 'data' in response:
+            if 'maintainInfos' in response['data']:
+                raise ServerMaintenance(
+                    f'Coway Servers are undergoing maintenance.'
+                )
         return response
