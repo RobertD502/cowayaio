@@ -10,6 +10,7 @@ class PurifierData:
 
     purifiers: dict[str, CowayPurifier]
 
+
 @dataclass
 class CowayPurifier:
     """Dataclass for Coway IoCare Purifier"""
@@ -26,6 +27,7 @@ class CowayPurifier:
     fan_speed: int | None
     light_on: bool
     light_mode: int
+    button_lock: int | None
     timer: str | None
     timer_remaining: int | None
     pre_filter_pct: int
