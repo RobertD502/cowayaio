@@ -2,6 +2,7 @@
 
 from .str_enum import StrEnum
 
+
 class Endpoint(StrEnum):
 
     BASE_URI = 'https://iocare.iotsvc.coway.com/api/v1'
@@ -50,6 +51,7 @@ class LightMode(StrEnum):
 
     AQI_OFF = '1'
     OFF = '2'
+    HALF_OFF = '3'  # For IconS only
     ON = '0'
 
 
