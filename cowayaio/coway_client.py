@@ -23,7 +23,13 @@ from cowayaio.constants import (
     PREFILTER_CYCLE,
     TIMEOUT,
 )
-from cowayaio.exceptions import AuthError, CowayError, PasswordExpired, ServerMaintenance
+from cowayaio.exceptions import (
+    AuthError,
+    CowayError,
+    PasswordExpired,
+    RateLimited,
+    ServerMaintenance
+)
 from cowayaio.purifier_model import PurifierData, CowayPurifier
 
 
@@ -63,13 +69,18 @@ class CowayClient:
         self.access_token, self.refresh_token = await self._get_token(auth_code)
         # Token expires in 1 hour
         self.token_expiration = datetime.now() + timedelta(seconds=3600)
+        LOGGER.debug(
+            f'Token expiration set to {self.token_expiration}.'
+        )
         self.country_code = await self._get_country_code()
         self.places = await self._get_places()
 
     async def _get_login_cookies(self) -> tuple[str, SimpleCookie]:
         """Get openid-connect login url and associated cookies."""
 
+        LOGGER.debug(f'Getting Coway login cookies for {self.username}')
         response, html_page = await self._get(Endpoint.OAUTH_URL)
+        LOGGER.debug(f'Login cookies response: {response}')
         if (status := response.status) != 200:
             error = response.reason
             if status == 503:
@@ -83,6 +94,7 @@ class CowayClient:
         soup = BeautifulSoup(html_page, 'html.parser')
         try:
             login_url = soup.find('form', id='kc-form-login').get('action')
+            LOGGER.debug(f'Login URL obtained: {login_url}')
         except AttributeError:
             raise CowayError(f'Coway API error: Coway servers did not return a valid Login URL. Retrying now.')
         return login_url, cookies
@@ -110,15 +122,14 @@ class CowayClient:
             'new_password': '',
             'new_password_confirm': ''
         }
-
+        LOGGER.debug(f'Obtaining auth code for {self.username}')
         response, password_skip_init = await self._post(login_url, cookies, headers, data)
+        LOGGER.debug(f'Auth code response: {response}')
         if password_skip_init:
             response, password_skip_init = await self._post(response, cookies, headers, password_skip_data)
-        if not response.history:
-            raise AuthError(f'Coway API authentication error: unable to retrieve auth code. Likely due to invalid username/password.')
-        else:
-            code = response.url.query_string.partition('code=')[-1]
-            return code
+            LOGGER.debug(f'Auth code skip password response: {response}')
+        code = response.url.query_string.partition('code=')[-1]
+        return code
 
     async def _get_token(self, auth_code: str) -> tuple[str, str]:
         """Get access token and refresh token."""
@@ -128,22 +139,66 @@ class CowayClient:
             'redirectUrl': Endpoint.REDIRECT_URL,
         }
 
+        LOGGER.debug(f'Obtaining access/refresh token for {self.username}')
         response = await self._post_endpoint(data)
-        return response['data']['accessToken'], response['data']['refreshToken']
+
+        if 'error' in response:
+            LOGGER.debug(
+                f'Received error in response when obtaining access/refresh token for {self.username}. '
+                f'Response: {response}'
+            )
+            if response['error'].get('message') == ErrorMessages.INVALID_GRANT:
+                raise RateLimited(
+                    f'Failed fetching Coway access token. The account has likely '
+                    f'been rate limited. Please wait 24 hours before trying again.'
+                )
+            else:
+                raise CowayError(
+                    f'Failed fetching Coway access token: {response["error"].get("message")}'
+                )
+        else:
+            access_token: str | None = None
+            refresh_token: str | None = None
+            if 'data' in response:
+                access_token = response['data'].get('accessToken')
+                refresh_token = response['data'].get('refreshToken')
+            if access_token is not None and refresh_token is not None:
+                return access_token, refresh_token
+            else:
+                raise CowayError(
+                    f'Failed fetching Coway access/refresh token for {self.username}. '
+                    f'Response: {response}'
+                )
 
     async def _check_token(self) -> None:
         """Checks to see if token has expired and needs to be refreshed."""
 
         if self.check_token:
+            LOGGER.debug(f'Checking token for {self.username}')
             current_dt = datetime.now()
             if any(token_var is None for token_var in [self.access_token, self.refresh_token, self.token_expiration]):
+                LOGGER.debug(
+                    f'Coway token check determined one of access_token, refresh_token, or token_expiration is None. '
+                    f'Logging in to fetch access/refresh token for {self.username}'
+                )
                 await self.login()
+                return None
             # Refresh access token if it expires within 5 minutes
             elif (self.token_expiration-current_dt).total_seconds() < 300:
-                LOGGER.debug('Refreshing access and refresh tokens')
+                LOGGER.debug(
+                    f'Access token expires at {self.token_expiration}. '
+                    f'Token expiration is within 5 minutes. Refreshing token for {self.username}'
+                )
+                LOGGER.debug('Calling _refresh_token function')
                 await self._refresh_token()
+                return None
             else:
                 return None
+        else:
+            LOGGER.debug(
+                f'Token check is set to False. Skipping token check for {self.username} '
+            )
+            return None
 
     async def _refresh_token(self) -> None:
         """Obtain new access token using refresh token."""
@@ -157,27 +212,57 @@ class CowayClient:
         data = {
             'refreshToken': self.refresh_token,
         }
+
         url = f'{Endpoint.BASE_URI}{Endpoint.TOKEN_REFRESH}'
+        LOGGER.debug(f'Refreshing tokens for {self.username} at {url}')
         async with self._session.post(url, headers=headers, data=json.dumps(data), timeout=self.timeout) as resp:
             response = await self._response(resp)
-            self.access_token = response['data']['accessToken']
-            self.refresh_token = response['data']['refreshToken']
-            self.token_expiration = datetime.now() + timedelta(seconds=3600)
+            if 'error' in response:
+                LOGGER.debug(
+                    f'Error received while refreshing tokens for {self.username}. '
+                    f'Response: {response}'
+                )
+            self.access_token = response['data'].get('accessToken')
+            self.refresh_token = response['data'].get('refreshToken')
+            if self.access_token is None or self.refresh_token is None:
+                raise CowayError(
+                    f'Failed to refresh tokens for {self.username}. '
+                    f'Response: {response}'
+                )
+            else:
+                self.token_expiration = datetime.now() + timedelta(seconds=3600)
+                LOGGER.debug(
+                    f'Tokens have been refreshed for {self.username}. '
+                    f'New token expiration: {self.token_expiration}'
+                )
 
     async def _get_country_code(self) -> str:
         """Obtain country code associated with the account."""
 
         endpoint = f'{Endpoint.BASE_URI}{Endpoint.USER_INFO}'
         headers = await self._create_endpoint_header()
+        LOGGER.debug(f'Getting country code for {self.username}')
         response = await self._get_endpoint(endpoint=endpoint, headers=headers, params=None)
         if 'data' in response:
+            LOGGER.debug(
+                f'Country code retrieval response for {self.username}: '
+                f'{json.dumps(response["data"], indent=4)}'
+            )
             if 'maintainInfos' in response['data']:
                 raise ServerMaintenance(
                     f'Coway Servers are undergoing maintenance.'
                 )
+            if 'memberInfo' in response['data']:
+                country_code = response['data']['memberInfo'].get('countryCode')
+                if country_code is not None:
+                    return country_code
+                else:
+                    raise CowayError(
+                        f' Failed to get country code for {self.username}. '
+                        f'Response: {response}'
+                    )
         if 'error' in response:
             raise CowayError(f'Failed to get country code associated with account. {response["error"]}')
-        return response['data']['memberInfo']['countryCode']
 
     async def _get_places(self) -> list[dict[str, Any]]:
         """Fetches all places(homes) associated with account."""
@@ -191,10 +276,24 @@ class CowayClient:
             'timezoneId': Parameter.TIMEZONE
         }
         headers = await self._create_endpoint_header()
+        LOGGER.debug(f'Getting places for {self.username}')
         response = await self._get_endpoint(endpoint=endpoint, headers=headers, params=params)
         if 'error' in response:
             raise CowayError(f'Failed to get places associated with account. {response["error"]}')
-        return response['data']['content']
+        if 'data' in response:
+            places = response['data'].get('content')
+            if places is not None:
+                return places
+            else:
+                raise CowayError(
+                    f'No places found associated with {self.username}. '
+                    f'Response: {response}'
+                )
+        else:
+            raise CowayError(
+                f'No places found associated with {self.username}. '
+                f'Response: {response}'
+            )
 
     async def async_get_purifiers(self) -> list[dict[str, Any]]:
         """Gets all purifiers linked to Coway account."""
@@ -203,37 +302,91 @@ class CowayClient:
             'pageIndex': '0',
             'pageSize': '100'
         }
+        headers = await self._create_endpoint_header()
         purifiers: list[dict[str, Any]] = []
         for place in self.places:
+            LOGGER.debug(
+                f'Checking place for {self.username}. '
+                f'Place ID: {place.get("placeId")}, Place Name: {place.get("placeName")}, '
+                f'Place Device Count: {place.get("deviceCnt")}'
+            )
             if place['deviceCnt'] != 0:
                 url = f'{Endpoint.BASE_URI}{Endpoint.PLACES}/{place["placeId"]}/devices'
-                headers = await self._create_endpoint_header()
+                LOGGER.debug(
+                    f'Fetching devices for {self.username}. '
+                    f'Place ID: {place.get("placeId")}, Place Name: {place.get("placeName")}, '
+                    f'URL: {url}'
+                )
                 try:
                     response = await self._get_endpoint(url, headers, params)
                 except AuthError:
-                    LOGGER.debug('Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.')
+                    LOGGER.debug(
+                        'Coway IoCare access and refresh tokens are invalid. Attempting to fetch new tokens.'
+                    )
                     await self.login()
                     headers = await self._create_endpoint_header()
                     response = await self._get_endpoint(url, headers, params)
                 if 'error' in response:
-                    raise CowayError(f'Failed to get Coway devices. {response["error"]}')
-                for device in response['data']['content']:
-                    if device['categoryName'] == CATEGORY_NAME:
-                        purifiers.append(device)
+                    raise CowayError(
+                        f'Failed to get Coway devices for Place ID: {place.get("placeId")} '
+                        f'Response: {response["error"]}'
+                    )
+                if 'data' in response:
+                    devices = response['data'].get('content')
+                    if devices is not None:
+                        for device in response['data']['content']:
+                            if device['categoryName'] == CATEGORY_NAME:
+                                purifiers.append(device)
+                    else:
+                        LOGGER.debug(
+                            f'No devices found for account {self.username} at '
+                            f'Place ID: {place.get("placeId")}, Place Name: {place.get("placeName")}'
+                        )
+                else:
+                    LOGGER.debug(
+                        f'No devices found for account {self.username} at '
+                        f'Place ID: {place.get("placeId")}, Place Name: {place.get("placeName")}'
+                    )
         return purifiers
 
     async def async_get_purifiers_data(self) -> PurifierData:
         """Return dataclass with Purifier Devices."""
 
+        LOGGER.debug(
+            f'Get purifiers data function: Getting purifiers data for {self.username}'
+        )
         if not self.places:
+            LOGGER.debug(
+                f'No places loaded. Doing initial login for {self.username}'
+            )
             await self.login()
+        LOGGER.debug(
+            f'Get purifiers data function: Calling async_get_purifiers'
+        )
         purifiers = await self.async_get_purifiers()
+        LOGGER.debug(
+            f'Purifiers found for {self.username}: {json.dumps(purifiers, indent=4)}'
+        )
         #  Prevent checking access token for every purifier iteration after it has
         #  already been checked once.
         self.check_token = False
+        LOGGER.debug(
+            f'self.check_token set to False to prevent checking tokens multiple times '
+            f'within get_purifiers_data function.'
+        )
+        LOGGER.debug(
+            f'Get purifiers data function: Calling async_server_maintenance_notice'
+        )
         await self.async_server_maintenance_notice()
         device_data: dict[str, CowayPurifier] = {}
         for dev in purifiers:
+            LOGGER.debug(
+                f'Starting construction of CowayPurifier object for device '
+                f'{dev.get("dvcNick")} on account {self.username}'
+            )
+            LOGGER.debug(
+                f'Fetching purifier HTML page for device {dev.get("dvcNick")}'
+            )
             purifier_html = await self._get_purifier_html(
                 dev['dvcNick'],
                 dev['deviceSerial'],
@@ -248,105 +401,137 @@ class CowayClient:
                 end_index = script_text.rfind('}')
                 extracted_string = script_text[start_index:end_index + 1].replace('\\', '')
                 purifier_json = json.loads(extracted_string)
-                purifier_info: dict[str, Any] = {}
-                for data in purifier_json['children']:
-                    if isinstance(data, dict):
-                        purifier_info = data
+                LOGGER.debug(
+                    f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
+                )
+                purifier_info: dict[str, Any] | None = {}
+                if 'children' in purifier_json:
+                    for data in purifier_json['children']:
+                        if isinstance(data, dict):
+                            purifier_info = data
+                else:
+                    LOGGER.debug(
+                        f'No children key found for purifier {dev.get("dvcNick")}. '
+                        f'Setting purifier info variable to None.'
+                    )
+                    purifier_info = None
             except (AttributeError, Exception) as purifier_error:
-                raise CowayError(f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}')
+                raise CowayError(
+                    f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
+                )
 
-            parsed_info = {
-                'device_info': None,
-                'mcu_info': None,
-                'network_info': None,
-                'sensor_info': None,
-                'status_info': None,
-                'aq_grade': None,
-                'filter_info': None,
-                'timer_info': None,
+            parsed_info: dict[str, Any] = {
+                'device_info': {},
+                'mcu_info': {},
+                'network_info': {},
+                'sensor_info': {},
+                'status_info': {},
+                'aq_grade': {},
+                'filter_info': {},
+                'timer_info': str | None,
             }
             LOGGER.debug(
-                f'Purifier {dev["dvcNick"]} Fetched: {json.dumps(purifier_info, indent=4)}'
+                f'Purifier {dev["dvcNick"]} purifier_info variable: {json.dumps(purifier_info, indent=4)}'
             )
-            for data in purifier_info['coreData']:
-                if 'currentMcuVer' in data['data']:
-                    parsed_info['mcu_info'] = data['data']
-                if 'sensorInfo' in data['data']:
-                    parsed_info['sensor_info'] = data['data']['sensorInfo']['attributes']
+            for data in purifier_info.get('coreData'):
+                if 'currentMcuVer' in data.get('data'):
+                    parsed_info['mcu_info'] = data.get('data', {})
+                if 'sensorInfo' in data.get('data'):
+                    parsed_info['sensor_info'] = data['data']['sensorInfo'].get('attributes', {})
             if 'deviceStatusData' in purifier_info:
-                parsed_info['status_info'] = purifier_info['deviceStatusData']['data']['statusInfo']['attributes']
+                parsed_info['status_info'] = purifier_info['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
             if 'baseInfoForModelCodeData' in purifier_info:
-                parsed_info['device_info'] = purifier_info['baseInfoForModelCodeData']['deviceInfo']
+                parsed_info['device_info'] = purifier_info['baseInfoForModelCodeData'].get('deviceInfo', {})
             if 'deviceModule' in purifier_info:
-                parsed_info['network_info'] = purifier_info['deviceModule']['data']['content']['deviceModuleDetailInfo']
-                parsed_info['aq_grade'] = purifier_info['deviceModule']['data']['content']['deviceModuleDetailInfo']['airStatusInfo']
+                parsed_info['network_info'] = purifier_info['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
+                parsed_info['aq_grade'] = purifier_info['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
 
+            LOGGER.debug(
+                f'Fetching filter info endpoint for purifier {dev.get("dvcNick")}'
+            )
             filter_info = await self.async_fetch_filter_status(
                 dev['placeId'],
                 dev['deviceSerial'],
                 dev['dvcNick']
             )
-
-            filter_dict: dict[str, Any] = {}
+            LOGGER.debug(
+                f'{dev.get("dvcNick")} filters endpoint response: {filter_info}'
+            )
+            filter_dict: dict[str, Any]  = {}
             for dev_filter in filter_info:
-                if dev_filter['supplyNm'] == 'Pre-Filter':
+                if dev_filter.get('supplyNm') == 'Pre-Filter':
                     filter_dict['pre-filter'] = dev_filter
                 else:
                     filter_dict['max2'] = dev_filter
             parsed_info['filter_info'] = filter_dict
-
+            LOGGER.debug(
+                f'{dev.get("dvcNick")} filter dict constructed: {filter_dict}'
+            )
+            LOGGER.debug(
+                f'Fetching timer endpoint for {dev.get("dvcNick")}'
+            )
             timer = await self.async_fetch_timer(dev['deviceSerial'], dev['dvcNick'])
-            parsed_info['timer_info'] = timer['offTimer']
+            parsed_info['timer_info'] = timer.get('offTimer')
 
             device_attr = {
-                'device_id': dev['deviceSerial'],
-                'model': parsed_info['device_info']['productName'],
-                'model_code': dev['productModel'],
-                'name': dev['dvcNick'],
-                'product_name': parsed_info['device_info']['prodName'],
-                'place_id': dev['placeId'],
+                'device_id': dev.get('deviceSerial'),
+                'model': parsed_info['device_info'].get('productName'),
+                'model_code': dev.get('productModel'),
+                'name': dev.get('dvcNick'),
+                'product_name': parsed_info['device_info'].get('prodName'),
+                'place_id': dev.get('placeId'),
             }
-            network_status = parsed_info['network_info']['wifiConnected']
-            if not network_status:
-                LOGGER.debug(f'{device_attr["name"]} Purifier is not connected to WiFi.')
+            network_status = parsed_info['network_info'].get('wifiConnected')
+            if not network_status and network_status is not None:
+                LOGGER.debug(
+                    f'{device_attr["name"]} Purifier is not connected to WiFi.'
+                )
 
-            mcu_version = parsed_info['mcu_info']['currentMcuVer']
-            is_on = parsed_info['status_info']['0001'] == 1
-            auto_mode = parsed_info['status_info']['0002'] == 1
-            auto_eco_mode = parsed_info['status_info']['0002'] == 6
-            eco_mode = parsed_info['status_info']['0002'] == 6
-            night_mode = parsed_info['status_info']['0002'] == 2
-            rapid_mode = parsed_info['status_info']['0002'] == 5
-            fan_speed = parsed_info['status_info']['0003']
-            light_on = parsed_info['status_info']['0007'] == 2
+            mcu_version = parsed_info['mcu_info'].get('currentMcuVer')
+            is_on = parsed_info['status_info'].get('0001') == 1
+            auto_mode = parsed_info['status_info'].get('0002') == 1
+            auto_eco_mode = parsed_info['status_info'].get('0002') == 6
+            eco_mode = parsed_info['status_info'].get('0002') == 6
+            night_mode = parsed_info['status_info'].get('0002') == 2
+            rapid_mode = parsed_info['status_info'].get('0002') == 5
+            fan_speed = parsed_info['status_info'].get('0003')
+            light_on = parsed_info['status_info'].get('0007') == 2
             # 250s/IconS purifier has more than just on and off
-            light_mode = parsed_info['status_info']['0007']
-            button_lock = parsed_info['status_info'].get('0024', None)
+            light_mode = parsed_info['status_info'].get('0007')
+            button_lock = parsed_info['status_info'].get('0024')
             timer = parsed_info['timer_info']
-            timer_remaining = parsed_info['status_info']['0008']
-            if parsed_info['filter_info']:
-                pre_filter_pct = parsed_info['filter_info']['pre-filter']['filterRemain']
-                max2_pct = parsed_info['filter_info']['max2']['filterRemain']
-                pre_filter_change_frequency = parsed_info['filter_info']['pre-filter']['replaceCycle']
+            timer_remaining = parsed_info['status_info'].get('0008')
+            if filters := parsed_info['filter_info']:
+                if 'pre-filter' in filters:
+                    pre_filter_pct = parsed_info['filter_info']['pre-filter'].get('filterRemain')
+                    pre_filter_change_frequency = parsed_info['filter_info']['pre-filter'].get('replaceCycle')
+                else:
+                    pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
+                    pre_filter_change_frequency = None
+                if 'max2' in filters:
+                    max2_pct = parsed_info['filter_info']['max2'].get('filterRemain')
+                else:
+                    max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
+
             else:
                 # 250S filter endpoint is currently under development by Coway
-                pre_filter_pct = 100 - parsed_info['sensor_info']['0011']
-                max2_pct = 100 - parsed_info['sensor_info']['0012']
+                pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
+                max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
                 pre_filter_change_frequency = None
-            aq_grade = parsed_info['aq_grade']['iaqGrade']
+            aq_grade = parsed_info['aq_grade'].get('iaqGrade')
             if '0001' in parsed_info['sensor_info']:
                 particulate_matter_2_5 = parsed_info['sensor_info']['0001']
             else:
-                particulate_matter_2_5 = parsed_info['sensor_info'].get('PM25_IDX', None)
+                particulate_matter_2_5 = parsed_info['sensor_info'].get('PM25_IDX')
             if '0002' in parsed_info['sensor_info']:
                 particulate_matter_10 = parsed_info['sensor_info']['0002']
             else:
-                particulate_matter_10 = parsed_info['sensor_info'].get('PM10_IDX', None)
-            carbon_dioxide = parsed_info['sensor_info'].get('CO2_IDX', None)
-            volatile_organic_compounds = parsed_info['sensor_info'].get('VOCs_IDX', None)
-            air_quality_index = parsed_info['sensor_info'].get('IAQ', None)
-            lux_sensor = parsed_info['sensor_info'].get('0007', None)  # raw value has units of lx. For 250S and 400S.
-            smart_mode_sensitivity = parsed_info['status_info']['000A']
+                particulate_matter_10 = parsed_info['sensor_info'].get('PM10_IDX')
+            carbon_dioxide = parsed_info['sensor_info'].get('CO2_IDX')
+            volatile_organic_compounds = parsed_info['sensor_info'].get('VOCs_IDX')
+            air_quality_index = parsed_info['sensor_info'].get('IAQ')
+            lux_sensor = parsed_info['sensor_info'].get('0007')  # raw value has units of lx. For 250S and 400S.
+            smart_mode_sensitivity = parsed_info['status_info'].get('000A')
             device_data[device_attr['device_id']] = CowayPurifier(
                 device_attr=device_attr,
                 mcu_version=mcu_version,
@@ -375,10 +560,21 @@ class CowayClient:
                 pre_filter_change_frequency=pre_filter_change_frequency,
                 smart_mode_sensitivity=smart_mode_sensitivity
             )
+            LOGGER.debug(
+                f'Finished constructing CowayPurifier object for {device_attr.get("name")}'
+            )
         #  Make sure token is checked again during next poll / when control
         #  commands are sent
+        LOGGER.debug(
+            f' Setting self.check_token back to True'
+        )
         self.check_token = True
-        return PurifierData(purifiers=device_data)
+        all_purifiers = PurifierData(purifiers=device_data)
+        LOGGER.debug(
+            f'Constructed final PurifierData object for {self.username}: '
+            f'{json.dumps(all_purifiers, default=vars, indent=4)}'
+        )
+        return all_purifiers
 
     async def async_server_maintenance_notice(self) -> None:
         """Fetch latest notice regarding Coway server maintenance."""
@@ -403,12 +599,33 @@ class CowayClient:
             'title': '',
             'topPinnedYn': ''
         }
+        LOGGER.debug(
+            f'Fetching server maintenance notices from Coway server: {url}'
+        )
         list_response = await self._get_endpoint(url, headers, params)
+        notice_check: int | None = None
         if 'error' in list_response:
-            raise CowayError(f'Failed to get Coway server maintenance notices: {list_response["error"]}')
-        notice_check = list_response["data"]["content"][0]["noticeSeq"]
-        if not self.server_maintenance or notice_check != self.server_maintenance['sequence']:
+            raise CowayError(
+                f'Failed to get Coway server maintenance notices: {list_response["error"]}'
+            )
+        if 'data' in list_response:
+            if notices := list_response['data'].get('content'):
+                LOGGER.debug(
+                    f'Found the following Coway server maintenance notices: '
+                    f'{notices}'
+                )
+                notice_check = notices[0]["noticeSeq"]
+                LOGGER.debug(
+                    f'Latest notice sequence is {notice_check}'
+                )
+            else:
+                notice_check = None
+        if not self.server_maintenance or notice_check != self.server_maintenance.get('sequence'):
             url = f'{Endpoint.BASE_URI}{Endpoint.NOTICES}/{list_response["data"]["content"][0]["noticeSeq"]}'
+            LOGGER.debug(
+                f'Server maintenance notice info not fetched before. Fetching now. '
+                f'URL: {url}'
+            )
             headers = {
                 'region': 'NUS',
                 'accept': 'application/json, text/plain, */*',
@@ -420,9 +637,17 @@ class CowayClient:
             }
             latest_notice = await self._get_endpoint(url, headers, params)
             if 'error' in latest_notice:
-                raise CowayError(f'Failed to get Coway server maintenance latest notice: {latest_notice["error"]}')
+                raise CowayError(
+                    f'Failed to get Coway server maintenance latest notice: {latest_notice["error"]}'
+                )
+            LOGGER.debug(
+                f'Latest notice response content: {latest_notice}'
+            )
             soup = BeautifulSoup(latest_notice['data']['content'], 'html.parser')
             notice_text = soup.find_all('p')
+            LOGGER.debug(
+                f'Parsed notice text: {notice_text}'
+            )
             notice_lines: list[str] = []
             search_result: tuple[int, ...] | None = None
             for content in notice_text:
@@ -433,6 +658,9 @@ class CowayClient:
                         search_result = re.search(pattern, lower_text).groups()
 
             notice_info: str = '\n'.join(notice_lines)
+            LOGGER.debug(
+                f'Joined notice info lines: {notice_info}'
+            )
             if search_result and len(search_result) == 4:
                 format_string = '%Y-%m-%d %H:%M'
                 start_dt_string = f'{search_result[0]} {search_result[1]}'
@@ -450,6 +678,9 @@ class CowayClient:
                     'end_date_time': end_dt,
                     'description': notice_info
                 }
+                LOGGER.debug(
+                    f'self.server_maintenance dict set to: {self.server_maintenance}'
+                )
             else:
                 self.server_maintenance = {
                     'sequence': None,
@@ -457,7 +688,14 @@ class CowayClient:
                     'end_date_time': None,
                     'description': notice_info
                 }
+                LOGGER.debug(
+                    f' self.server_maintenance dict set to: {self.server_maintenance}'
+                )
         else:
+            LOGGER.debug(
+                f'Latest server maintenance info matches already fetched info. '
+                f'Skipping fetching it again.'
+            )
             return
 
     async def async_fetch_filter_status(
@@ -487,7 +725,7 @@ class CowayClient:
         response = await self._get_endpoint(url, headers, params)
         if 'error' in response:
             raise CowayError(f'Failed to get filter status for purifier {name}: {response["error"]}')
-        return response['data']['suppliesList']
+        return response.get('data', {}).get('suppliesList', {})
 
     async def async_fetch_timer(self, serial: str, name: str) -> dict[str, Any]:
         """Get current timer that has been set."""
@@ -506,7 +744,7 @@ class CowayClient:
         response = await self._get_endpoint(url, headers, None)
         if 'error' in response:
             raise CowayError(f'Failed to get timer for purifier {name}: {response["error"]}')
-        return response['data']
+        return response.get('data', {})
 
     """
     **************************************************************************************************************************************************
@@ -749,6 +987,9 @@ class CowayClient:
         # in the current session. If not cleared, Coway will not return
         # the login form for subsequent login attempts.
         self._session.cookie_jar.clear()
+        LOGGER.debug(
+            f'Sending request to endpoint {url}'
+        )
         async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
             html_page = await resp.text()
             return resp, html_page
@@ -761,13 +1002,22 @@ class CowayClient:
                 html_page = await resp.text()
                 soup = BeautifulSoup(html_page, 'html.parser')
                 page_title = soup.find('title').string
-                if (page_title is not None) and (page_title == 'Coway - Password change message'):
-                    if self.skip_password_change:
-                        form_url = soup.find('form', id='kc-password-change-form').get('action')
-                        password_skip_init = True
-                        return form_url, password_skip_init
+                if page_title is not None:
+                    if page_title == 'Coway - Password change message':
+                        if self.skip_password_change:
+                            form_url = soup.find('form', id='kc-password-change-form').get('action')
+                            password_skip_init = True
+                            return form_url, password_skip_init
+                        else:
+                            raise PasswordExpired("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
                     else:
-                        raise PasswordExpired("Coway servers are requesting a password change as the password on this account hasn't been changed for 60 days or more.")
+                        error_message = soup.find('p', class_="member_error_msg")
+                        if error_message and error_message.text == 'Your ID or password is incorrect.':
+                            raise AuthError(
+                                f'Coway API authentication error: Invalid username/password.'
+                            )
+                        else:
+                            return resp, False
                 else:
                     password_skip_init = False
                     return resp, password_skip_init
@@ -840,7 +1090,9 @@ class CowayClient:
             'weightUnit': 'oz',
             'gravityUnit': 'lb'
         }
-
+        LOGGER.debug(
+            f'Fetching purifier HTML page at {url}'
+        )
         async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
             html_page = await resp.text()
             return html_page
@@ -978,4 +1230,5 @@ class CowayClient:
                 raise ServerMaintenance(
                     f'Coway Servers are undergoing maintenance.'
                 )
+
         return response
