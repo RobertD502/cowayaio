@@ -33,6 +33,7 @@ class CowayPurifier:
     timer_remaining: int | None
     pre_filter_pct: int | None
     max2_pct: int | None
+    odor_filter_pct: int | None
     aq_grade: int | None
     particulate_matter_2_5: int | None
     particulate_matter_10: int | None
