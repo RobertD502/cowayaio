@@ -479,6 +479,7 @@ class CowayClient:
                 'device_id': dev.get('deviceSerial'),
                 'model': parsed_info['device_info'].get('productName'),
                 'model_code': dev.get('productModel'),
+                'code': parsed_info['device_info'].get('modelCode'),
                 'name': dev.get('dvcNick'),
                 'product_name': parsed_info['device_info'].get('prodName'),
                 'place_id': dev.get('placeId'),
@@ -520,6 +521,8 @@ class CowayClient:
                 pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
                 max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
                 pre_filter_change_frequency = None
+            # Model codes UK (02FMG), Europe (02FMF, 02FWN)
+            odor_filter = 100 - parsed_info['sensor_info']['0013'] if '0013' in parsed_info['sensor_info'] else None
             aq_grade = parsed_info['aq_grade'].get('iaqGrade')
             if '0001' in parsed_info['sensor_info']:
                 particulate_matter_2_5 = parsed_info['sensor_info']['0001']
@@ -552,6 +555,7 @@ class CowayClient:
                 timer_remaining=timer_remaining,
                 pre_filter_pct=pre_filter_pct,
                 max2_pct=max2_pct,
+                odor_filter_pct=odor_filter,
                 aq_grade=aq_grade,
                 particulate_matter_2_5=particulate_matter_2_5,
                 particulate_matter_10=particulate_matter_10,
