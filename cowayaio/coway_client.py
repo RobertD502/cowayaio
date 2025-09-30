@@ -150,7 +150,9 @@ class CowayClient:
             if response['error'].get('message') == ErrorMessages.INVALID_GRANT:
                 raise RateLimited(
                     f'Failed fetching Coway access token. The account has likely '
-                    f'been rate limited. Please wait 24 hours before trying again.'
+                    f'been rate-limited (blocked). Please wait 24 hours before trying again. '
+                    f'If, after 24 hours, you\'re unable to log in even with the mobile IoCare+ app, '
+                    f'please contact Coway support.'
                 )
             else:
                 raise CowayError(
