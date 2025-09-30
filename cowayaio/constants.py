@@ -1,6 +1,7 @@
 """Constants for CowayAIO"""
 
 from .str_enum import StrEnum
+from .__version__ import __version__ as version
 
 
 class Endpoint(StrEnum):
@@ -33,18 +34,18 @@ class Header(StrEnum):
     CALLING_PAGE = 'product'
     CONTENT_JSON = "application/json"
     COWAY_LANGUAGE = "en-US,en;q=0.9"
-    COWAY_USER_AGENT = "IoCare/1 CFNetwork/3826.500.131 Darwin/24.5.0"
-    HTML_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148CowayAppCore"
+    COWAY_USER_AGENT = f"CowayAIO/{version}"
+    HTML_USER_AGENT = f"CowayAIO/{version}"
     SOURCE_PATH = 'iOS'
     THEME = 'light'
-    USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 app iocare"
-
+    USER_AGENT = f"CowayAIO/{version}"
 
 class ErrorMessages(StrEnum):
 
     BAD_TOKEN = 'Unauthenticated (crypto/rsa: verification error)'
     EXPIRED_TOKEN = 'Unauthenticated (Token is expired)'
     INVALID_REFRESH_TOKEN = '통합회원 토큰 갱신 오류 (error: invalid_grant)(error_desc: Invalid refresh token)'
+    INVALID_GRANT = '통합회원 토큰 발급 오류 (error: invalid_grant)(error_desc: Code not valid)'
 
 
 class LightMode(StrEnum):
@@ -62,3 +63,4 @@ PREFILTER_CYCLE = {
     4: '224'
 }
 TIMEOUT = 5 * 60
+

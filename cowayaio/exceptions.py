@@ -33,3 +33,11 @@ class ServerMaintenance(Exception):
     def __init__(self, *args: Any) -> None:
         """Initialize the exception."""
         Exception.__init__(self, *args)
+
+
+class RateLimited(Exception):
+    """Coway API indicating account has been rate-limited"""
+
+    def __init__(self, *args: Any) -> None:
+        """Initialize the exception."""
+        Exception.__init__(self, *args)
