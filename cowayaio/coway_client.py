@@ -26,6 +26,8 @@ from cowayaio.constants import (
 from cowayaio.exceptions import (
     AuthError,
     CowayError,
+    NoPlaces,
+    NoPurifiers,
     PasswordExpired,
     RateLimited,
     ServerMaintenance
@@ -287,12 +289,12 @@ class CowayClient:
             if places is not None:
                 return places
             else:
-                raise CowayError(
+                raise NoPlaces(
                     f'No places found associated with {self.username}. '
                     f'Response: {response}'
                 )
         else:
-            raise CowayError(
+            raise NoPlaces(
                 f'No places found associated with {self.username}. '
                 f'Response: {response}'
             )
@@ -369,6 +371,10 @@ class CowayClient:
         LOGGER.debug(
             f'Purifiers found for {self.username}: {json.dumps(purifiers, indent=4)}'
         )
+        if not purifiers:
+            raise NoPurifiers(
+                f'No purifiers found for any IoCare+ places associated with {self.username}. '
+            )
         #  Prevent checking access token for every purifier iteration after it has
         #  already been checked once.
         self.check_token = False
