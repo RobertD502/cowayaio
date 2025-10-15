@@ -41,3 +41,19 @@ class RateLimited(Exception):
     def __init__(self, *args: Any) -> None:
         """Initialize the exception."""
         Exception.__init__(self, *args)
+
+
+class NoPlaces(Exception):
+    """Coway API indicating account has no places defined"""
+
+    def __init__(self, *args: Any) -> None:
+        """Initialize the exception."""
+        Exception.__init__(self, *args)
+
+
+class NoPurifiers(Exception):
+    """Coway API indicating account has no purifiers on account"""
+
+    def __init__(self, *args: Any) -> None:
+        """Initialize the exception."""
+        Exception.__init__(self, *args)
