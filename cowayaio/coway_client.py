@@ -405,24 +405,25 @@ class CowayClient:
             try:
                 script_search = soup.select('script:-soup-contains("sensorInfo")')
                 script_text = script_search[0].text
-                start_index = script_text.find('{')
-                end_index = script_text.rfind('}')
-                extracted_string = script_text[start_index:end_index + 1].replace('\\', '')
-                purifier_json = json.loads(extracted_string)
+                decoder = json.JSONDecoder()
+                # Decode the push argument to preserve escaped JSON strings.
+                script_data, _ = decoder.raw_decode(script_text, script_text.index('['))
+                script_text = script_data[1]
+                purifier_info: dict[str, Any] | None = None
+                # The script now contains multiple objects; find the device props.
+                for match in re.finditer(r'\{', script_text):
+                    try:
+                        data, _ = decoder.raw_decode(script_text, match.start())
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(data.get('coreData'), list) and 'deviceStatusData' in data:
+                        purifier_info = data
+                        break
+                if purifier_info is None:
+                    raise ValueError('No purifier data found in HTML page')
                 LOGGER.debug(
-                    f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
+                    f'Parsed the following purifier JSON info: {json.dumps(purifier_info, indent=4)}'
                 )
-                purifier_info: dict[str, Any] | None = {}
-                if 'children' in purifier_json:
-                    for data in purifier_json['children']:
-                        if isinstance(data, dict):
-                            purifier_info = data
-                else:
-                    LOGGER.debug(
-                        f'No children key found for purifier {dev.get("dvcNick")}. '
-                        f'Setting purifier info variable to None.'
-                    )
-                    purifier_info = None
             except (AttributeError, Exception) as purifier_error:
                 raise CowayError(
                     f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
