@@ -359,229 +359,231 @@ class CowayClient:
         LOGGER.debug(
             f'Get purifiers data function: Getting purifiers data for {self.username}'
         )
-        if not self.places:
-            LOGGER.debug(
-                f'No places loaded. Doing initial login for {self.username}'
-            )
-            await self.login()
-        LOGGER.debug(
-            f'Get purifiers data function: Calling async_get_purifiers'
-        )
-        purifiers = await self.async_get_purifiers()
-        LOGGER.debug(
-            f'Purifiers found for {self.username}: {json.dumps(purifiers, indent=4)}'
-        )
-        if not purifiers:
-            raise NoPurifiers(
-                f'No purifiers found for any IoCare+ places associated with {self.username}. '
-            )
-        #  Prevent checking access token for every purifier iteration after it has
-        #  already been checked once.
-        self.check_token = False
-        LOGGER.debug(
-            f'self.check_token set to False to prevent checking tokens multiple times '
-            f'within get_purifiers_data function.'
-        )
-        LOGGER.debug(
-            f'Get purifiers data function: Calling async_server_maintenance_notice'
-        )
-        await self.async_server_maintenance_notice()
-        device_data: dict[str, CowayPurifier] = {}
-        for dev in purifiers:
-            LOGGER.debug(
-                f'Starting construction of CowayPurifier object for device '
-                f'{dev.get("dvcNick")} on account {self.username}'
-            )
-            LOGGER.debug(
-                f'Fetching purifier HTML page for device {dev.get("dvcNick")}'
-            )
-            purifier_html = await self._get_purifier_html(
-                dev['dvcNick'],
-                dev['deviceSerial'],
-                dev['modelCode'],
-                dev['placeId']
-            )
-            soup = BeautifulSoup(purifier_html, 'html.parser')
-            try:
-                script_search = soup.select('script:-soup-contains("sensorInfo")')
-                script_text = script_search[0].text
-                cleaned_script = script_text.replace('\\"', '"').replace('\\\\', '\\')
-                match = re.search(r'(\{"familyId":"01".*?"sensorInfo":.*)', cleaned_script, re.DOTALL)
-
-                if not match:
-                    raise CowayError("JSON structure not found in script block.")
-
-                extracted_string = match.group(1)
-                decoder = json.JSONDecoder()
-                purifier_json, _ = decoder.raw_decode(extracted_string)
+        try:
+            if not self.places:
                 LOGGER.debug(
-                    f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
+                    f'No places loaded. Doing initial login for {self.username}'
                 )
-
-            except (AttributeError, Exception) as purifier_error:
-                raise CowayError(
-                    f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
+                await self.login()
+            LOGGER.debug(
+                f'Get purifiers data function: Calling async_get_purifiers'
+            )
+            purifiers = await self.async_get_purifiers()
+            LOGGER.debug(
+                f'Purifiers found for {self.username}: {json.dumps(purifiers, indent=4)}'
+            )
+            if not purifiers:
+                raise NoPurifiers(
+                    f'No purifiers found for any IoCare+ places associated with {self.username}. '
                 )
-
-            parsed_info: dict[str, Any] = {
-                'device_info': {},
-                'mcu_info': {},
-                'network_info': {},
-                'sensor_info': {},
-                'status_info': {},
-                'aq_grade': {},
-                'filter_info': {},
-                'timer_info': str | None,
-            }
+            #  Prevent checking access token for every purifier iteration after it has
+            #  already been checked once.
+            self.check_token = False
             LOGGER.debug(
-                f'Purifier {dev["dvcNick"]} purifier_info variable: {json.dumps(purifier_json, indent=4)}'
-            )
-            for data in purifier_json.get('coreData'):
-                if 'currentMcuVer' in data.get('data'):
-                    parsed_info['mcu_info'] = data.get('data', {})
-                if 'sensorInfo' in data.get('data'):
-                    parsed_info['sensor_info'] = data['data']['sensorInfo'].get('attributes', {})
-            if 'deviceStatusData' in purifier_json:
-                parsed_info['status_info'] = purifier_json['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
-            if 'baseInfoForModelCodeData' in purifier_json:
-                parsed_info['device_info'] = purifier_json['baseInfoForModelCodeData'].get('deviceInfo', {})
-            if 'deviceModule' in purifier_json:
-                parsed_info['network_info'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
-                parsed_info['aq_grade'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
-
-            LOGGER.debug(
-                f'Fetching filter info endpoint for purifier {dev.get("dvcNick")}'
-            )
-            filter_info = await self.async_fetch_filter_status(
-                dev['placeId'],
-                dev['deviceSerial'],
-                dev['dvcNick']
+                f'self.check_token set to False to prevent checking tokens multiple times '
+                f'within get_purifiers_data function.'
             )
             LOGGER.debug(
-                f'{dev.get("dvcNick")} filters endpoint response: {filter_info}'
+                f'Get purifiers data function: Calling async_server_maintenance_notice'
             )
-            filter_dict: dict[str, Any]  = {}
-            for dev_filter in filter_info:
-                if dev_filter.get('supplyNm') == 'Pre-Filter':
-                    filter_dict['pre-filter'] = dev_filter
-                else:
-                    filter_dict['max2'] = dev_filter
-            parsed_info['filter_info'] = filter_dict
-            LOGGER.debug(
-                f'{dev.get("dvcNick")} filter dict constructed: {filter_dict}'
-            )
-            LOGGER.debug(
-                f'Fetching timer endpoint for {dev.get("dvcNick")}'
-            )
-            timer = await self.async_fetch_timer(dev['deviceSerial'], dev['dvcNick'])
-            parsed_info['timer_info'] = timer.get('offTimer')
-
-            device_attr = {
-                'device_id': dev.get('deviceSerial'),
-                'model': parsed_info['device_info'].get('productName'),
-                'model_code': dev.get('productModel'),
-                'code': parsed_info['device_info'].get('modelCode'),
-                'name': dev.get('dvcNick'),
-                'product_name': parsed_info['device_info'].get('prodName'),
-                'place_id': dev.get('placeId'),
-            }
-            network_status = parsed_info['network_info'].get('wifiConnected')
-            if not network_status and network_status is not None:
+            await self.async_server_maintenance_notice()
+            device_data: dict[str, CowayPurifier] = {}
+            for dev in purifiers:
                 LOGGER.debug(
-                    f'{device_attr["name"]} Purifier is not connected to WiFi.'
+                    f'Starting construction of CowayPurifier object for device '
+                    f'{dev.get("dvcNick")} on account {self.username}'
                 )
+                LOGGER.debug(
+                    f'Fetching purifier HTML page for device {dev.get("dvcNick")}'
+                )
+                purifier_html = await self._get_purifier_html(
+                    dev['dvcNick'],
+                    dev['deviceSerial'],
+                    dev['modelCode'],
+                    dev['placeId']
+                )
+                soup = BeautifulSoup(purifier_html, 'html.parser')
+                try:
+                    script_search = soup.select('script:-soup-contains("sensorInfo")')
+                    script_text = script_search[0].text
+                    cleaned_script = script_text.replace('\\"', '"').replace('\\\\', '\\')
+                    match = re.search(r'(\{"familyId":"01".*?"sensorInfo":.*)', cleaned_script, re.DOTALL)
 
-            mcu_version = parsed_info['mcu_info'].get('currentMcuVer')
-            is_on = parsed_info['status_info'].get('0001') == 1
-            auto_mode = parsed_info['status_info'].get('0002') == 1
-            auto_eco_mode = parsed_info['status_info'].get('0002') == 6
-            eco_mode = parsed_info['status_info'].get('0002') == 6
-            night_mode = parsed_info['status_info'].get('0002') == 2
-            rapid_mode = parsed_info['status_info'].get('0002') == 5
-            fan_speed = parsed_info['status_info'].get('0003')
-            light_on = parsed_info['status_info'].get('0007') == 2
-            # 250s/IconS purifier has more than just on and off
-            light_mode = parsed_info['status_info'].get('0007')
-            button_lock = parsed_info['status_info'].get('0024')
-            timer = parsed_info['timer_info']
-            timer_remaining = parsed_info['status_info'].get('0008')
-            if filters := parsed_info['filter_info']:
-                if 'pre-filter' in filters:
-                    pre_filter_pct = parsed_info['filter_info']['pre-filter'].get('filterRemain')
-                    pre_filter_change_frequency = parsed_info['filter_info']['pre-filter'].get('replaceCycle')
+                    if not match:
+                        raise CowayError("JSON structure not found in script block.")
+
+                    extracted_string = match.group(1)
+                    decoder = json.JSONDecoder()
+                    purifier_json, _ = decoder.raw_decode(extracted_string)
+                    LOGGER.debug(
+                        f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
+                    )
+
+                except (AttributeError, Exception) as purifier_error:
+                    raise CowayError(
+                        f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
+                    )
+
+                parsed_info: dict[str, Any] = {
+                    'device_info': {},
+                    'mcu_info': {},
+                    'network_info': {},
+                    'sensor_info': {},
+                    'status_info': {},
+                    'aq_grade': {},
+                    'filter_info': {},
+                    'timer_info': str | None,
+                }
+                LOGGER.debug(
+                    f'Purifier {dev["dvcNick"]} purifier_json variable: {json.dumps(purifier_json, indent=4)}'
+                )
+                for data in purifier_json.get('coreData'):
+                    if 'currentMcuVer' in data.get('data'):
+                        parsed_info['mcu_info'] = data.get('data', {})
+                    if 'sensorInfo' in data.get('data'):
+                        parsed_info['sensor_info'] = data['data']['sensorInfo'].get('attributes', {})
+                if 'deviceStatusData' in purifier_json:
+                    parsed_info['status_info'] = purifier_json['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
+                if 'baseInfoForModelCodeData' in purifier_json:
+                    parsed_info['device_info'] = purifier_json['baseInfoForModelCodeData'].get('deviceInfo', {})
+                if 'deviceModule' in purifier_json:
+                    parsed_info['network_info'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
+                    parsed_info['aq_grade'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
+
+                LOGGER.debug(
+                    f'Fetching filter info endpoint for purifier {dev.get("dvcNick")}'
+                )
+                filter_info = await self.async_fetch_filter_status(
+                    dev['placeId'],
+                    dev['deviceSerial'],
+                    dev['dvcNick']
+                )
+                LOGGER.debug(
+                    f'{dev.get("dvcNick")} filters endpoint response: {filter_info}'
+                )
+                filter_dict: dict[str, Any]  = {}
+                for dev_filter in filter_info:
+                    if dev_filter.get('supplyNm') == 'Pre-Filter':
+                        filter_dict['pre-filter'] = dev_filter
+                    else:
+                        filter_dict['max2'] = dev_filter
+                parsed_info['filter_info'] = filter_dict
+                LOGGER.debug(
+                    f'{dev.get("dvcNick")} filter dict constructed: {filter_dict}'
+                )
+                LOGGER.debug(
+                    f'Fetching timer endpoint for {dev.get("dvcNick")}'
+                )
+                timer = await self.async_fetch_timer(dev['deviceSerial'], dev['dvcNick'])
+                parsed_info['timer_info'] = timer.get('offTimer')
+
+                device_attr = {
+                    'device_id': dev.get('deviceSerial'),
+                    'model': parsed_info['device_info'].get('productName'),
+                    'model_code': dev.get('productModel'),
+                    'code': parsed_info['device_info'].get('modelCode'),
+                    'name': dev.get('dvcNick'),
+                    'product_name': parsed_info['device_info'].get('prodName'),
+                    'place_id': dev.get('placeId'),
+                }
+                network_status = parsed_info['network_info'].get('wifiConnected')
+                if not network_status and network_status is not None:
+                    LOGGER.debug(
+                        f'{device_attr["name"]} Purifier is not connected to WiFi.'
+                    )
+
+                mcu_version = parsed_info['mcu_info'].get('currentMcuVer')
+                is_on = parsed_info['status_info'].get('0001') == 1
+                auto_mode = parsed_info['status_info'].get('0002') == 1
+                auto_eco_mode = parsed_info['status_info'].get('0002') == 6
+                eco_mode = parsed_info['status_info'].get('0002') == 6
+                night_mode = parsed_info['status_info'].get('0002') == 2
+                rapid_mode = parsed_info['status_info'].get('0002') == 5
+                fan_speed = parsed_info['status_info'].get('0003')
+                light_on = parsed_info['status_info'].get('0007') == 2
+                # 250s/IconS purifier has more than just on and off
+                light_mode = parsed_info['status_info'].get('0007')
+                button_lock = parsed_info['status_info'].get('0024')
+                timer = parsed_info['timer_info']
+                timer_remaining = parsed_info['status_info'].get('0008')
+                if filters := parsed_info['filter_info']:
+                    if 'pre-filter' in filters:
+                        pre_filter_pct = parsed_info['filter_info']['pre-filter'].get('filterRemain')
+                        pre_filter_change_frequency = parsed_info['filter_info']['pre-filter'].get('replaceCycle')
+                    else:
+                        pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
+                        pre_filter_change_frequency = None
+                    if 'max2' in filters:
+                        max2_pct = parsed_info['filter_info']['max2'].get('filterRemain')
+                    else:
+                        max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
+
                 else:
+                    # 250S filter endpoint is currently under development by Coway
                     pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
-                    pre_filter_change_frequency = None
-                if 'max2' in filters:
-                    max2_pct = parsed_info['filter_info']['max2'].get('filterRemain')
-                else:
                     max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
-
-            else:
-                # 250S filter endpoint is currently under development by Coway
-                pre_filter_pct = 100 - parsed_info['sensor_info']['0011'] if '0011' in parsed_info['sensor_info'] else None
-                max2_pct = 100 - parsed_info['sensor_info']['0012'] if '0012' in parsed_info['sensor_info'] else None
-                pre_filter_change_frequency = None
-            # Model codes UK (02FMG), Europe (02FMF, 02FWN)
-            odor_filter = 100 - parsed_info['sensor_info']['0013'] if '0013' in parsed_info['sensor_info'] else None
-            aq_grade = parsed_info['aq_grade'].get('iaqGrade')
-            if '0001' in parsed_info['sensor_info']:
-                particulate_matter_2_5 = parsed_info['sensor_info']['0001']
-            else:
-                particulate_matter_2_5 = parsed_info['sensor_info'].get('PM25_IDX')
-            if '0002' in parsed_info['sensor_info']:
-                particulate_matter_10 = parsed_info['sensor_info']['0002']
-            else:
-                particulate_matter_10 = parsed_info['sensor_info'].get('PM10_IDX')
-            carbon_dioxide = parsed_info['sensor_info'].get('CO2_IDX')
-            volatile_organic_compounds = parsed_info['sensor_info'].get('VOCs_IDX')
-            air_quality_index = parsed_info['sensor_info'].get('IAQ')
-            lux_sensor = parsed_info['sensor_info'].get('0007')  # raw value has units of lx. For 250S and 400S.
-            smart_mode_sensitivity = parsed_info['status_info'].get('000A')
-            device_data[device_attr['device_id']] = CowayPurifier(
-                device_attr=device_attr,
-                mcu_version=mcu_version,
-                network_status=network_status,
-                is_on=is_on,
-                auto_mode=auto_mode,
-                auto_eco_mode=auto_eco_mode,
-                eco_mode=eco_mode,
-                night_mode=night_mode,
-                rapid_mode=rapid_mode,
-                fan_speed=fan_speed,
-                light_on=light_on,
-                light_mode=light_mode,
-                button_lock=button_lock,
-                timer=timer,
-                timer_remaining=timer_remaining,
-                pre_filter_pct=pre_filter_pct,
-                max2_pct=max2_pct,
-                odor_filter_pct=odor_filter,
-                aq_grade=aq_grade,
-                particulate_matter_2_5=particulate_matter_2_5,
-                particulate_matter_10=particulate_matter_10,
-                carbon_dioxide=carbon_dioxide,
-                volatile_organic_compounds=volatile_organic_compounds,
-                air_quality_index=air_quality_index,
-                lux_sensor=lux_sensor,
-                pre_filter_change_frequency=pre_filter_change_frequency,
-                smart_mode_sensitivity=smart_mode_sensitivity
-            )
+                    pre_filter_change_frequency = None
+                # Model codes UK (02FMG), Europe (02FMF, 02FWN)
+                odor_filter = 100 - parsed_info['sensor_info']['0013'] if '0013' in parsed_info['sensor_info'] else None
+                aq_grade = parsed_info['aq_grade'].get('iaqGrade')
+                if '0001' in parsed_info['sensor_info']:
+                    particulate_matter_2_5 = parsed_info['sensor_info']['0001']
+                else:
+                    particulate_matter_2_5 = parsed_info['sensor_info'].get('PM25_IDX')
+                if '0002' in parsed_info['sensor_info']:
+                    particulate_matter_10 = parsed_info['sensor_info']['0002']
+                else:
+                    particulate_matter_10 = parsed_info['sensor_info'].get('PM10_IDX')
+                carbon_dioxide = parsed_info['sensor_info'].get('CO2_IDX')
+                volatile_organic_compounds = parsed_info['sensor_info'].get('VOCs_IDX')
+                air_quality_index = parsed_info['sensor_info'].get('IAQ')
+                lux_sensor = parsed_info['sensor_info'].get('0007')  # raw value has units of lx. For 250S and 400S.
+                smart_mode_sensitivity = parsed_info['status_info'].get('000A')
+                device_data[device_attr['device_id']] = CowayPurifier(
+                    device_attr=device_attr,
+                    mcu_version=mcu_version,
+                    network_status=network_status,
+                    is_on=is_on,
+                    auto_mode=auto_mode,
+                    auto_eco_mode=auto_eco_mode,
+                    eco_mode=eco_mode,
+                    night_mode=night_mode,
+                    rapid_mode=rapid_mode,
+                    fan_speed=fan_speed,
+                    light_on=light_on,
+                    light_mode=light_mode,
+                    button_lock=button_lock,
+                    timer=timer,
+                    timer_remaining=timer_remaining,
+                    pre_filter_pct=pre_filter_pct,
+                    max2_pct=max2_pct,
+                    odor_filter_pct=odor_filter,
+                    aq_grade=aq_grade,
+                    particulate_matter_2_5=particulate_matter_2_5,
+                    particulate_matter_10=particulate_matter_10,
+                    carbon_dioxide=carbon_dioxide,
+                    volatile_organic_compounds=volatile_organic_compounds,
+                    air_quality_index=air_quality_index,
+                    lux_sensor=lux_sensor,
+                    pre_filter_change_frequency=pre_filter_change_frequency,
+                    smart_mode_sensitivity=smart_mode_sensitivity
+                )
+                LOGGER.debug(
+                    f'Finished constructing CowayPurifier object for {device_attr.get("name")}'
+                )
+            all_purifiers = PurifierData(purifiers=device_data)
             LOGGER.debug(
-                f'Finished constructing CowayPurifier object for {device_attr.get("name")}'
+                f'Constructed final PurifierData object for {self.username}: '
+                f'{json.dumps(all_purifiers, default=vars, indent=4)}'
             )
-        #  Make sure token is checked again during next poll / when control
-        #  commands are sent
-        LOGGER.debug(
-            f' Setting self.check_token back to True'
-        )
-        self.check_token = True
-        all_purifiers = PurifierData(purifiers=device_data)
-        LOGGER.debug(
-            f'Constructed final PurifierData object for {self.username}: '
-            f'{json.dumps(all_purifiers, default=vars, indent=4)}'
-        )
-        return all_purifiers
+            return all_purifiers
+        finally:
+            #  Make sure token is checked again during next poll / when control
+            #  commands are sent
+            LOGGER.debug(
+                f' Setting self.check_token back to True'
+            )
+            self.check_token = True
 
     async def async_server_maintenance_notice(self) -> None:
         """Fetch latest notice regarding Coway server maintenance."""
