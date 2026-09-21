@@ -405,24 +405,19 @@ class CowayClient:
             try:
                 script_search = soup.select('script:-soup-contains("sensorInfo")')
                 script_text = script_search[0].text
-                start_index = script_text.find('{')
-                end_index = script_text.rfind('}')
-                extracted_string = script_text[start_index:end_index + 1].replace('\\', '')
-                purifier_json = json.loads(extracted_string)
+                cleaned_script = script_text.replace('\\"', '"').replace('\\\\', '\\')
+                match = re.search(r'(\{"familyId":"01".*?"sensorInfo":.*)', cleaned_script, re.DOTALL)
+
+                if not match:
+                    raise CowayError("JSON structure not found in script block.")
+
+                extracted_string = match.group(1)
+                decoder = json.JSONDecoder()
+                purifier_json, _ = decoder.raw_decode(extracted_string)
                 LOGGER.debug(
                     f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
                 )
-                purifier_info: dict[str, Any] | None = {}
-                if 'children' in purifier_json:
-                    for data in purifier_json['children']:
-                        if isinstance(data, dict):
-                            purifier_info = data
-                else:
-                    LOGGER.debug(
-                        f'No children key found for purifier {dev.get("dvcNick")}. '
-                        f'Setting purifier info variable to None.'
-                    )
-                    purifier_info = None
+
             except (AttributeError, Exception) as purifier_error:
                 raise CowayError(
                     f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
@@ -439,20 +434,20 @@ class CowayClient:
                 'timer_info': str | None,
             }
             LOGGER.debug(
-                f'Purifier {dev["dvcNick"]} purifier_info variable: {json.dumps(purifier_info, indent=4)}'
+                f'Purifier {dev["dvcNick"]} purifier_info variable: {json.dumps(purifier_json, indent=4)}'
             )
-            for data in purifier_info.get('coreData'):
+            for data in purifier_json.get('coreData'):
                 if 'currentMcuVer' in data.get('data'):
                     parsed_info['mcu_info'] = data.get('data', {})
                 if 'sensorInfo' in data.get('data'):
                     parsed_info['sensor_info'] = data['data']['sensorInfo'].get('attributes', {})
-            if 'deviceStatusData' in purifier_info:
-                parsed_info['status_info'] = purifier_info['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
-            if 'baseInfoForModelCodeData' in purifier_info:
-                parsed_info['device_info'] = purifier_info['baseInfoForModelCodeData'].get('deviceInfo', {})
-            if 'deviceModule' in purifier_info:
-                parsed_info['network_info'] = purifier_info['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
-                parsed_info['aq_grade'] = purifier_info['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
+            if 'deviceStatusData' in purifier_json:
+                parsed_info['status_info'] = purifier_json['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
+            if 'baseInfoForModelCodeData' in purifier_json:
+                parsed_info['device_info'] = purifier_json['baseInfoForModelCodeData'].get('deviceInfo', {})
+            if 'deviceModule' in purifier_json:
+                parsed_info['network_info'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
+                parsed_info['aq_grade'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
 
             LOGGER.debug(
                 f'Fetching filter info endpoint for purifier {dev.get("dvcNick")}'
