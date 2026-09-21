@@ -392,37 +392,6 @@ class CowayClient:
                 f'Starting construction of CowayPurifier object for device '
                 f'{dev.get("dvcNick")} on account {self.username}'
             )
-            LOGGER.debug(
-                f'Fetching purifier HTML page for device {dev.get("dvcNick")}'
-            )
-            purifier_html = await self._get_purifier_html(
-                dev['dvcNick'],
-                dev['deviceSerial'],
-                dev['modelCode'],
-                dev['placeId']
-            )
-            soup = BeautifulSoup(purifier_html, 'html.parser')
-            try:
-                script_search = soup.select('script:-soup-contains("sensorInfo")')
-                script_text = script_search[0].text
-                cleaned_script = script_text.replace('\\"', '"').replace('\\\\', '\\')
-                match = re.search(r'(\{"familyId":"01".*?"sensorInfo":.*)', cleaned_script, re.DOTALL)
-
-                if not match:
-                    raise CowayError("JSON structure not found in script block.")
-
-                extracted_string = match.group(1)
-                decoder = json.JSONDecoder()
-                purifier_json, _ = decoder.raw_decode(extracted_string)
-                LOGGER.debug(
-                    f'Parsed the following purifier JSON info: {json.dumps(purifier_json, indent=4)}'
-                )
-
-            except (AttributeError, Exception) as purifier_error:
-                raise CowayError(
-                    f'Coway Error - Failed to parse purifier HTML page for info: {purifier_error}'
-                )
-
             parsed_info: dict[str, Any] = {
                 'device_info': {},
                 'mcu_info': {},
@@ -433,21 +402,34 @@ class CowayClient:
                 'filter_info': {},
                 'timer_info': str | None,
             }
+            # Coway migrated iocare2.coway.com to a client-side-rendered (Next.js)
+            # app, so the per-device data is no longer embedded in the purifier
+            # HTML page. Fetch it from the JSON API endpoints the app itself now
+            # calls, instead of scraping HTML. (fixes #100)
             LOGGER.debug(
-                f'Purifier {dev["dvcNick"]} purifier_info variable: {json.dumps(purifier_json, indent=4)}'
+                f'Fetching status/sensor/connection endpoints for device {dev.get("dvcNick")}'
             )
-            for data in purifier_json.get('coreData'):
-                if 'currentMcuVer' in data.get('data'):
-                    parsed_info['mcu_info'] = data.get('data', {})
-                if 'sensorInfo' in data.get('data'):
-                    parsed_info['sensor_info'] = data['data']['sensorInfo'].get('attributes', {})
-            if 'deviceStatusData' in purifier_json:
-                parsed_info['status_info'] = purifier_json['deviceStatusData'].get('data', {}).get('statusInfo', {}).get('attributes', {})
-            if 'baseInfoForModelCodeData' in purifier_json:
-                parsed_info['device_info'] = purifier_json['baseInfoForModelCodeData'].get('deviceInfo', {})
-            if 'deviceModule' in purifier_json:
-                parsed_info['network_info'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {})
-                parsed_info['aq_grade'] = purifier_json['deviceModule'].get('data', {}).get('content', {}).get('deviceModuleDetailInfo', {}).get('airStatusInfo')
+            parsed_info['status_info'] = await self.async_fetch_device_status(
+                dev['deviceSerial'], dev['dvcNick']
+            )
+            parsed_info['sensor_info'] = await self.async_fetch_device_sensor(
+                dev['deviceSerial'], dev['dvcNick']
+            )
+            is_connected = await self.async_fetch_connection(
+                dev['deviceSerial'], dev['dvcNick']
+            )
+            parsed_info['network_info'] = {'wifiConnected': is_connected}
+            # Model/product metadata previously came from the scraped page. Reuse
+            # whatever the device listing already provides; any missing value is
+            # cosmetic (the device model label) and safely defaults to None.
+            parsed_info['device_info'] = {
+                'productName': dev.get('productName') or dev.get('prodName') or dev.get('productModel'),
+                'modelCode': dev.get('modelCode'),
+                'prodName': dev.get('prodName'),
+            }
+            LOGGER.debug(
+                f'Purifier {dev["dvcNick"]} parsed_info: {json.dumps(parsed_info, default=str, indent=4)}'
+            )
 
             LOGGER.debug(
                 f'Fetching filter info endpoint for purifier {dev.get("dvcNick")}'
@@ -752,6 +734,57 @@ class CowayClient:
         if 'error' in response:
             raise CowayError(f'Failed to get timer for purifier {name}: {response["error"]}')
         return response.get('data', {})
+
+    def _device_endpoint_headers(self) -> dict[str, str]:
+        """Common headers for the per-device JSON API endpoints."""
+        return {
+            'region': 'NUS',
+            'accept': 'application/json, text/plain, */*',
+            'authorization': f'Bearer {self.access_token}',
+            'accept-language': Header.COWAY_LANGUAGE,
+            'user-agent': Header.HTML_USER_AGENT,
+        }
+
+    async def async_fetch_device_status(self, serial: str, name: str) -> dict[str, Any]:
+        """Fetch live control-status attributes for a purifier.
+
+        Replaces the former purifier-HTML-page scrape (Coway moved that data to a
+        client-side app). Returns statusInfo.attributes, e.g.
+        {'0001': 1, '0002': 0, '0003': 1, ...}.
+        """
+        if self.check_token:
+            await self._check_token()
+        url = f'{Endpoint.BASE_URI}/com/devices/{serial}/status'
+        params = {'membershipYn': 'N', 'langCd': Header.ACCEPT_LANG}
+        response = await self._get_endpoint(url, self._device_endpoint_headers(), params)
+        if 'error' in response:
+            raise CowayError(f'Failed to get status for purifier {name}: {response["error"]}')
+        return response.get('data', {}).get('statusInfo', {}).get('attributes', {})
+
+    async def async_fetch_device_sensor(self, serial: str, name: str) -> dict[str, Any]:
+        """Fetch live sensor attributes (PM, IAQ, lux, filter-life proxies) for a purifier.
+
+        Returns sensorInfo.attributes, e.g. {'PM25_IDX': 0, 'IAQ': 20, '0007': 906, ...}.
+        """
+        if self.check_token:
+            await self._check_token()
+        url = f'{Endpoint.BASE_URI}/com/devices/{serial}/sensor'
+        params = {'membershipYn': 'N', 'langCd': Header.ACCEPT_LANG}
+        response = await self._get_endpoint(url, self._device_endpoint_headers(), params)
+        if 'error' in response:
+            raise CowayError(f'Failed to get sensor data for purifier {name}: {response["error"]}')
+        return response.get('data', {}).get('sensorInfo', {}).get('attributes', {})
+
+    async def async_fetch_connection(self, serial: str, name: str) -> bool | None:
+        """Fetch the cloud/Wi-Fi connection state for a purifier."""
+        if self.check_token:
+            await self._check_token()
+        url = f'{Endpoint.BASE_URI}/com/devices/{serial}/connection'
+        params = {'membershipYn': 'N', 'langCd': Header.ACCEPT_LANG}
+        response = await self._get_endpoint(url, self._device_endpoint_headers(), params)
+        if 'error' in response:
+            raise CowayError(f'Failed to get connection for purifier {name}: {response["error"]}')
+        return response.get('data', {}).get('isConnection')
 
     """
     **************************************************************************************************************************************************
@@ -1070,39 +1103,6 @@ class CowayClient:
             'user-agent': Header.COWAY_USER_AGENT,
         }
         return headers
-
-    async def _get_purifier_html(self, nick_name: str, serial: str, model_code: str, place_id: str):
-        """Fetches HTML page presented in iOS app when viewing individual purifier."""
-
-        url = f'{Endpoint.PURIFIER_HTML_BASE}/{place_id}/product/{model_code}'
-        headers = {
-            'theme': Header.THEME,
-            'callingpage': Header.CALLING_PAGE,
-            'accept': Header.ACCEPT,
-            'dvcnick': nick_name,
-            'timezoneid': Parameter.TIMEZONE,
-            'appversion': Parameter.APP_VERSION,
-            'accesstoken': self.access_token,
-            'accept-language': Header.COWAY_LANGUAGE,
-            'region': 'NUS',
-            'user-agent': Header.HTML_USER_AGENT,
-            'srcpath': Header.SOURCE_PATH,
-            'deviceserial': serial
-        }
-
-        params = {
-            'bottomSlide': 'false',
-            'tab': '0',
-            'temperatureUnit': 'F',
-            'weightUnit': 'oz',
-            'gravityUnit': 'lb'
-        }
-        LOGGER.debug(
-            f'Fetching purifier HTML page at {url}'
-        )
-        async with self._session.get(url, headers=headers, params=params, timeout=self.timeout) as resp:
-            html_page = await resp.text()
-            return html_page
 
     async def async_control_purifier(self, device_attr: dict[str, str], command: str, value: Any) -> dict[str, Any] | str:
         """Main function to execute individual purifier control commands."""
