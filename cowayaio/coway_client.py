@@ -623,12 +623,43 @@ class CowayClient:
                     f'Found the following Coway server maintenance notices: '
                     f'{notices}'
                 )
-                notice_check = notices[0]["noticeSeq"]
-                LOGGER.debug(
-                    f'Latest notice sequence is {notice_check}'
-                )
+                notice_check = notices[0].get('noticeSeq')
+                if notice_check is None:
+                    LOGGER.debug(
+                        f'Latest notice sequence could not be found'
+                    )
+                    self.server_maintenance = {
+                        'sequence': None,
+                        'start_date_time': None,
+                        'end_date_time': None,
+                        'description': None
+                    }
+                    return
+                else:
+                    LOGGER.debug(
+                        f'Latest notice sequence is {notice_check}'
+                    )
             else:
                 notice_check = None
+                # Sets server_maintenance dict in the event that the response
+                # 'content' key is empty
+                self.server_maintenance = {
+                    'sequence': None,
+                    'start_date_time': None,
+                    'end_date_time': None,
+                    'description': None
+                }
+        else:
+            notice_check = None
+            # Sets server_maintenance dict in the event that the response
+            # 'data' key is empty
+            self.server_maintenance = {
+                'sequence': None,
+                'start_date_time': None,
+                'end_date_time': None,
+                'description': None
+            }
+
         if not self.server_maintenance or notice_check != self.server_maintenance.get('sequence'):
             url = f'{Endpoint.BASE_URI}{Endpoint.NOTICES}/{list_response["data"]["content"][0]["noticeSeq"]}'
             LOGGER.debug(
@@ -652,19 +683,31 @@ class CowayClient:
             LOGGER.debug(
                 f'Latest notice response content: {latest_notice}'
             )
-            soup = BeautifulSoup(latest_notice['data']['content'], 'html.parser')
-            notice_text = soup.find_all('p')
-            LOGGER.debug(
-                f'Parsed notice text: {notice_text}'
-            )
+            try:
+                soup = BeautifulSoup(latest_notice['data']['content'], 'html.parser')
+                notice_text = soup.find_all('p')
+                LOGGER.debug(
+                    f'Parsed notice text: {notice_text}'
+                )
+            except (KeyError, TypeError, AttributeError) as e:
+                LOGGER.error(f'Failed to parse server maintenance notice from data structure: {e}')
+                self.server_maintenance = {
+                    'sequence': latest_notice.get('data', {}).get('noticeSeq'),
+                    'start_date_time': None,
+                    'end_date_time': None,
+                    'description': None
+                }
+                return
+
             notice_lines: list[str] = []
-            search_result: tuple[int, ...] | None = None
+            search_result: tuple[str, ...] | None = None
             for content in notice_text:
                 if content.text != u'\xa0':
                     notice_lines.append(content.text)
-                    if '[edt]' in (lower_text := content.text.lower()):
-                        pattern = r'\[edt\].*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2}).*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2})'
-                        search_result = re.search(pattern, lower_text).groups()
+                    if any(tz in (lower_text := content.text.lower()) for tz in ('[edt]', '[est]')):
+                        pattern = r'\[e[ds]t\].*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2}).*(\d{4}-\d{2}-\d{2}).*(\d{2}:\d{2})'
+                        if match := re.search(pattern, lower_text):
+                            search_result = match.groups()
 
             notice_info: str = '\n'.join(notice_lines)
             LOGGER.debug(
@@ -682,7 +725,7 @@ class CowayClient:
                     end_dt_string, format_string
                 ).replace(tzinfo=edt_tz)
                 self.server_maintenance = {
-                    'sequence': latest_notice['data']['noticeSeq'],
+                    'sequence': latest_notice.get('data', {}).get('noticeSeq'),
                     'start_date_time': start_dt,
                     'end_date_time': end_dt,
                     'description': notice_info
@@ -692,7 +735,7 @@ class CowayClient:
                 )
             else:
                 self.server_maintenance = {
-                    'sequence': None,
+                    'sequence': latest_notice.get('data', {}).get('noticeSeq'),
                     'start_date_time': None,
                     'end_date_time': None,
                     'description': notice_info
@@ -701,10 +744,16 @@ class CowayClient:
                     f' self.server_maintenance dict set to: {self.server_maintenance}'
                 )
         else:
-            LOGGER.debug(
-                f'Latest server maintenance info matches already fetched info. '
-                f'Skipping fetching it again.'
-            )
+            if notice_check is None:
+                LOGGER.debug(
+                    f'Latest server maintenance info did not return a sequence '
+                    f'number.'
+                )
+            else:
+                LOGGER.debug(
+                    f'Latest server maintenance info matches already fetched info. '
+                    f'Skipping fetching it again.'
+                )
             return
 
     async def async_fetch_filter_status(
