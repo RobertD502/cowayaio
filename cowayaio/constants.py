@@ -9,7 +9,9 @@ class Endpoint(StrEnum):
     BASE_URI = 'https://iocare.iotsvc.coway.com/api/v1'
     GET_TOKEN = '/com/token'
     NOTICES = '/com/notices'
+    NO_PASS_SKIP_AUTH = 'https://id.coway.com/r2/authorization/authenticate-rest'
     OAUTH_URL = "https://id.coway.com/auth/realms/cw-account/protocol/openid-connect/auth"
+    NO_PASS_SKIP_OAUTH = "https://id.coway.com/r2/authorization/oidc/auth"
     REDIRECT_URL = "https://iocare-redirect.iotsvc.coway.com/redirect_bridge_empty.html"
     TOKEN_REFRESH = "/com/refresh-token"
     USER_INFO = "/com/my-info"
