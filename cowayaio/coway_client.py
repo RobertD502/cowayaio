@@ -7,11 +7,13 @@ from datetime import datetime, timedelta
 import json
 import logging
 import re
+from urllib.parse import urlparse, parse_qs
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from aiohttp import ClientResponse, ClientSession
 from http.cookies import SimpleCookie
+from yarl import URL
 
 from cowayaio.constants import (
     CATEGORY_NAME,
@@ -106,7 +108,7 @@ class CowayClient:
 
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': Header.USER_AGENT
+            'User-Agent': Header.USER_AGENT,
         }
         data = {
             'clientName': Parameter.CLIENT_NAME,
@@ -117,6 +119,14 @@ class CowayClient:
             'rememberMe': 'on'
         }
 
+        no_pass_skip_data = {
+            'username': self.username,
+            'password': self.password,
+            "is_remember_me": True,
+            "client_id": Parameter.CLIENT_ID,
+            "redirect_uri": Endpoint.REDIRECT_URL,
+        }
+
         password_skip_data = {
             'cmd': 'change_next_time',
             'checkPasswordNeededYn': 'Y',
@@ -124,14 +134,92 @@ class CowayClient:
             'new_password': '',
             'new_password_confirm': ''
         }
+
         LOGGER.debug(f'Obtaining auth code for {self.username}')
         response, password_skip_init = await self._post(login_url, cookies, headers, data)
-        LOGGER.debug(f'Auth code response: {response}')
+        LOGGER.debug(f'Auth code response: {response}, received password change notice: {password_skip_init}')
+
+        pass_skip_response: str | ClientResponse | None = None
+        no_skip_url: str | None = None
+        code: str | None = None
+
         if password_skip_init:
-            response, password_skip_init = await self._post(response, cookies, headers, password_skip_data)
-            LOGGER.debug(f'Auth code skip password response: {response}')
-        code = response.url.query_string.partition('code=')[-1]
+            pass_skip_response, password_skip_init = await self._post(response, cookies, headers, password_skip_data)
+            LOGGER.debug(f'Auth code skip password response: {pass_skip_response}')
+        else:
+            await self._no_pass_skip_cookies(headers)
+            oauth_url = URL(Endpoint.NO_PASS_SKIP_OAUTH.value)
+            domain_cookies = self._session.cookie_jar.filter_cookies(oauth_url)
+            xsrf_value = getattr(domain_cookies.get('cwxsrf'), 'value', None)
+            if xsrf_value is None:
+                raise CowayError(
+                    "CSRF token was not returned by Coway servers"
+                )
+            no_pass_skip_headers = {
+                'Content-Type': Header.CONTENT_JSON,
+                'User-Agent': Header.USER_AGENT,
+                'x-xsrf-token': xsrf_value,
+            }
+            LOGGER.debug(
+                f'Fetching Auth code with no_skip_password from {Endpoint.NO_PASS_SKIP_AUTH}'
+            )
+            async with self._session.post(
+                url=Endpoint.NO_PASS_SKIP_AUTH,
+                headers=no_pass_skip_headers,
+                json=no_pass_skip_data,
+                timeout=self.timeout
+            ) as resp:
+                LOGGER.debug(f'Auth code no skip password response: {resp}')
+                if resp.status != 200:
+                    raise CowayError(
+                        'Failed to fetch Auth code when password change is not required'
+                    )
+                no_skip_json = await resp.json()
+                no_skip_url = no_skip_json.get('redirect_uri')
+
+        if pass_skip_response:
+            auth_url = urlparse(pass_skip_response.url.human_repr())
+            parsed_params = parse_qs(auth_url.query)
+            code = parsed_params.get('code', [None])[0]
+        else:
+            if no_skip_url:
+                auth_url = urlparse(no_skip_url)
+                parsed_params = parse_qs(auth_url.query)
+                code = parsed_params.get('code', [None])[0]
+        if code is None:
+            raise CowayError(
+                f'No auth code found in response '
+                f'URL {pass_skip_response if pass_skip_response else no_skip_json}'
+            )
         return code
+
+    async def _no_pass_skip_cookies(self, headers: dict[str, Any]) -> None:
+        """Handle fetching cookies if password change notice isn't encountered """
+
+        # Must clear the cookies obtained from the initial login check
+        self._session.cookie_jar.clear()
+        data = {
+            'response_type': 'code',
+            'client_id': Parameter.CLIENT_ID,
+            'redirect_uri': Endpoint.REDIRECT_URL,
+            'ui_locales': 'en',
+            'scope': 'openid profile email',
+        }
+        LOGGER.debug(
+            f'Fetching no_pass_skip cookies at {Endpoint.NO_PASS_SKIP_OAUTH}'
+        )
+        async with self._session.get(
+                Endpoint.NO_PASS_SKIP_OAUTH,
+                headers=headers,
+                params=data,
+                timeout=self.timeout
+        ) as response:
+            if response.status != 200:
+                error = await response.text()
+                raise CowayError(
+                    f'Failed to get cookies during "No Password change required" scenario: {error}'
+                )
+            return
 
     async def _get_token(self, auth_code: str) -> tuple[str, str]:
         """Get access token and refresh token."""
